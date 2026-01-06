@@ -133,31 +133,45 @@ export const webhookEventsRelations = relations(webhookEvents, ({ one }) => ({
 // Connection status type
 export type ConnectionStatus = "disconnected" | "connecting" | "qr_ready" | "connected";
 
-// Zod schemas for validation
+// Zod schemas for validation - made permissive to accept all Chatwoot webhook events
 export const chatwootWebhookPayload = z.object({
   event: z.string(),
   id: z.number().optional(),
-  content: z.string().optional(),
+  content: z.string().optional().nullable(),
   content_type: z.string().optional(),
   message_type: z.string().optional(),
+  private: z.boolean().optional(),
+  source_id: z.string().optional().nullable(),
+  inbox: z.object({
+    id: z.number(),
+    name: z.string().optional(),
+  }).optional(),
   conversation: z.object({
     id: z.number(),
     inbox_id: z.number(),
+    status: z.string().optional(),
     contact_inbox: z.object({
-      source_id: z.string(),
-    }).optional(),
+      source_id: z.string().optional().nullable(),
+    }).optional().nullable(),
     meta: z.object({
       sender: z.object({
         id: z.number(),
-        name: z.string().optional(),
-        phone_number: z.string().optional(),
+        name: z.string().optional().nullable(),
+        phone_number: z.string().optional().nullable(),
+        identifier: z.string().optional().nullable(),
       }).optional(),
     }).optional(),
   }).optional(),
   sender: z.object({
-    id: z.number(),
-    type: z.string(),
+    id: z.number().optional(),
+    type: z.string().optional(),
+    name: z.string().optional(),
   }).optional(),
-});
+  account: z.object({
+    id: z.number(),
+    name: z.string().optional(),
+  }).optional(),
+  attachments: z.array(z.any()).optional(),
+}).passthrough(); // Allow any additional fields
 
 export type ChatwootWebhookPayload = z.infer<typeof chatwootWebhookPayload>;

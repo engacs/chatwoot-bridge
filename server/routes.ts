@@ -373,8 +373,14 @@ export async function registerRoutes(httpServer: Server, app: Express) {
 
       const parseResult = chatwootWebhookPayload.safeParse(req.body);
       if (!parseResult.success) {
-        console.warn("[Webhook] Invalid payload:", parseResult.error);
+        console.warn("[Webhook] Invalid payload:", JSON.stringify(parseResult.error.errors));
+        console.warn("[Webhook] Received body:", JSON.stringify(req.body).substring(0, 500));
         return res.status(400).json({ error: "Invalid webhook payload" });
+      }
+
+      console.log(`[Webhook] Account ${accountId} received event: ${parseResult.data.event}`);
+      if (parseResult.data.content) {
+        console.log(`[Webhook] Content: ${parseResult.data.content.substring(0, 100)}`);
       }
 
       // Log webhook event

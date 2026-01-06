@@ -271,15 +271,20 @@ export class ChatwootService {
     content?: string;
     conversationId?: number;
   }> {
+    console.log(`[Chatwoot] Processing webhook event: ${payload.event}, type: ${payload.message_type}`);
+    
     if (payload.event !== "message_created") {
+      console.log(`[Chatwoot] Ignoring non-message event: ${payload.event}`);
       return { shouldReply: false };
     }
 
     if (payload.message_type !== "outgoing") {
+      console.log(`[Chatwoot] Ignoring non-outgoing message: ${payload.message_type}`);
       return { shouldReply: false };
     }
 
     if (payload.sender?.type !== "user") {
+      console.log(`[Chatwoot] Ignoring non-user sender: ${payload.sender?.type}`);
       return { shouldReply: false };
     }
 
@@ -287,13 +292,25 @@ export class ChatwootService {
     const inboxId = payload.conversation?.inbox_id;
 
     if (inboxId !== parseInt(this.inboxId, 10)) {
+      console.log(`[Chatwoot] Ignoring wrong inbox: ${inboxId} vs ${this.inboxId}`);
       return { shouldReply: false };
     }
 
+    // Try multiple ways to extract phone number
     const sourceId = payload.conversation?.contact_inbox?.source_id;
-    const phoneNumber = payload.conversation?.meta?.sender?.phone_number || sourceId;
+    const senderPhone = payload.conversation?.meta?.sender?.phone_number;
+    const senderIdentifier = payload.conversation?.meta?.sender?.identifier;
+    const phoneNumber = senderPhone || senderIdentifier || sourceId;
 
-    if (!phoneNumber || !payload.content) {
+    console.log(`[Chatwoot] Phone extraction - sourceId: ${sourceId}, senderPhone: ${senderPhone}, identifier: ${senderIdentifier}`);
+
+    if (!phoneNumber) {
+      console.warn(`[Chatwoot] No phone number found in webhook payload`);
+      return { shouldReply: false };
+    }
+
+    if (!payload.content) {
+      console.log(`[Chatwoot] No content in message`);
       return { shouldReply: false };
     }
 
@@ -305,9 +322,13 @@ export class ChatwootService {
 
     this.processedMessages.add(`outgoing_${chatwootMessageId}`);
 
+    // Clean phone number - remove + and any non-numeric characters except @
+    const cleanPhone = phoneNumber.replace(/^\+/, "").replace(/@.*$/, "").replace(/[^0-9]/g, "");
+    console.log(`[Chatwoot] Will send to: ${cleanPhone}, content: ${payload.content.substring(0, 50)}`);
+
     return {
       shouldReply: true,
-      phoneNumber: phoneNumber.replace("+", ""),
+      phoneNumber: cleanPhone,
       content: payload.content,
       conversationId,
     };
