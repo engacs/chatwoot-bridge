@@ -253,6 +253,76 @@ export class ConnectionManager extends EventEmitter {
     return result || null;
   }
 
+  async sendMediaMessage(
+    accountId: number, 
+    remoteJid: string, 
+    mediaUrl: string, 
+    mediaType: string,
+    caption?: string,
+    fileName?: string
+  ): Promise<{ key?: { id?: string | null } } | null> {
+    const connData = this.connections.get(accountId);
+    if (!connData?.socket) {
+      throw new Error(`Account ${accountId} not connected`);
+    }
+
+    const jid = remoteJid.includes("@") ? remoteJid : `${remoteJid}@s.whatsapp.net`;
+    
+    try {
+      // Download the media from the URL
+      console.log(`[ConnectionManager] Downloading media from: ${mediaUrl}`);
+      const response = await fetch(mediaUrl);
+      if (!response.ok) {
+        throw new Error(`Failed to download media: ${response.status}`);
+      }
+      
+      const buffer = Buffer.from(await response.arrayBuffer());
+      const contentType = response.headers.get("content-type") || "application/octet-stream";
+      
+      console.log(`[ConnectionManager] Downloaded ${buffer.length} bytes, type: ${contentType}`);
+
+      let messageContent: any;
+      
+      // Determine WhatsApp message type based on content type or media type
+      if (mediaType.includes("image") || contentType.startsWith("image/")) {
+        messageContent = {
+          image: buffer,
+          caption: caption || undefined,
+          mimetype: contentType,
+        };
+      } else if (mediaType.includes("video") || contentType.startsWith("video/")) {
+        messageContent = {
+          video: buffer,
+          caption: caption || undefined,
+          mimetype: contentType,
+        };
+      } else if (mediaType.includes("audio") || contentType.startsWith("audio/")) {
+        // Check if it's a voice note (typically ogg/opus)
+        const isVoice = contentType.includes("ogg") || contentType.includes("opus") || mediaType.includes("voice");
+        messageContent = {
+          audio: buffer,
+          mimetype: contentType,
+          ptt: isVoice, // Push-to-talk for voice messages
+        };
+      } else {
+        // Default to document for all other types
+        messageContent = {
+          document: buffer,
+          mimetype: contentType,
+          fileName: fileName || `file_${Date.now()}`,
+          caption: caption || undefined,
+        };
+      }
+
+      const result = await connData.socket.sendMessage(jid, messageContent);
+      console.log(`[ConnectionManager] Account ${accountId} sent media to ${jid}: ${mediaType}`);
+      return result || null;
+    } catch (error) {
+      console.error(`[ConnectionManager] Failed to send media for account ${accountId}:`, error);
+      throw error;
+    }
+  }
+
   getConnection(accountId: number): WhatsAppConnection | undefined {
     return this.connections.get(accountId);
   }

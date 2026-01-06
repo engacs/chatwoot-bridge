@@ -270,11 +270,18 @@ export class ChatwootService {
     phoneNumber?: string;
     content?: string;
     conversationId?: number;
+    attachments?: Array<{ url: string; type: string; name?: string }>;
   }> {
-    console.log(`[Chatwoot] Processing webhook event: ${payload.event}, type: ${payload.message_type}`);
+    console.log(`[Chatwoot] Processing webhook event: ${payload.event}, type: ${payload.message_type}, private: ${payload.private}`);
     
     if (payload.event !== "message_created") {
       console.log(`[Chatwoot] Ignoring non-message event: ${payload.event}`);
+      return { shouldReply: false };
+    }
+
+    // Filter out private/secret notes - don't send to WhatsApp
+    if (payload.private === true) {
+      console.log(`[Chatwoot] Ignoring private note - not sending to WhatsApp`);
       return { shouldReply: false };
     }
 
@@ -309,8 +316,24 @@ export class ChatwootService {
       return { shouldReply: false };
     }
 
-    if (!payload.content) {
-      console.log(`[Chatwoot] No content in message`);
+    // Check for attachments
+    const attachments: Array<{ url: string; type: string; name?: string }> = [];
+    if (payload.attachments && Array.isArray(payload.attachments)) {
+      for (const att of payload.attachments) {
+        if (att.data_url) {
+          attachments.push({
+            url: att.data_url,
+            type: att.file_type || att.content_type || "file",
+            name: att.file_name || att.name,
+          });
+        }
+      }
+      console.log(`[Chatwoot] Found ${attachments.length} attachments`);
+    }
+
+    // Allow messages with content OR attachments
+    if (!payload.content && attachments.length === 0) {
+      console.log(`[Chatwoot] No content or attachments in message`);
       return { shouldReply: false };
     }
 
@@ -324,13 +347,14 @@ export class ChatwootService {
 
     // Clean phone number - remove + and any non-numeric characters except @
     const cleanPhone = phoneNumber.replace(/^\+/, "").replace(/@.*$/, "").replace(/[^0-9]/g, "");
-    console.log(`[Chatwoot] Will send to: ${cleanPhone}, content: ${payload.content.substring(0, 50)}`);
+    console.log(`[Chatwoot] Will send to: ${cleanPhone}, content: ${payload.content?.substring(0, 50) || "(media only)"}, attachments: ${attachments.length}`);
 
     return {
       shouldReply: true,
       phoneNumber: cleanPhone,
-      content: payload.content,
+      content: payload.content || "",
       conversationId,
+      attachments: attachments.length > 0 ? attachments : undefined,
     };
   }
 

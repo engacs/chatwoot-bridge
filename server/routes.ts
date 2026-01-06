@@ -396,31 +396,72 @@ export async function registerRoutes(httpServer: Server, app: Express) {
       const chatwootService = new ChatwootService(chatwootConfig, accountId);
       const result = await chatwootService.processWebhook(parseResult.data);
 
-      if (result.shouldReply && result.phoneNumber && result.content) {
+      if (result.shouldReply && result.phoneNumber) {
         try {
-          const msgResult = await connectionManager.sendMessage(
-            accountId,
-            result.phoneNumber,
-            result.content
-          );
+          // Send text content if present
+          if (result.content) {
+            const msgResult = await connectionManager.sendMessage(
+              accountId,
+              result.phoneNumber,
+              result.content
+            );
 
-          await chatwootService.logOutgoingMessage(
-            result.phoneNumber,
-            result.content,
-            msgResult?.key?.id || null,
-            "sent"
-          );
+            await chatwootService.logOutgoingMessage(
+              result.phoneNumber,
+              result.content,
+              msgResult?.key?.id || null,
+              "sent"
+            );
 
-          console.log(`[Webhook] Account ${accountId} sent message to ${result.phoneNumber}`);
+            console.log(`[Webhook] Account ${accountId} sent message to ${result.phoneNumber}`);
+          }
+
+          // Send media attachments if present
+          if (result.attachments && result.attachments.length > 0) {
+            for (const attachment of result.attachments) {
+              try {
+                console.log(`[Webhook] Sending attachment: ${attachment.type} - ${attachment.url}`);
+                
+                const mediaResult = await connectionManager.sendMediaMessage(
+                  accountId,
+                  result.phoneNumber,
+                  attachment.url,
+                  attachment.type,
+                  undefined, // caption already sent with text
+                  attachment.name
+                );
+
+                await chatwootService.logOutgoingMessage(
+                  result.phoneNumber,
+                  `[Media: ${attachment.type}] ${attachment.name || "attachment"}`,
+                  mediaResult?.key?.id || null,
+                  "sent"
+                );
+
+                console.log(`[Webhook] Account ${accountId} sent media to ${result.phoneNumber}: ${attachment.type}`);
+              } catch (mediaError) {
+                console.error(`[Webhook] Failed to send media attachment:`, mediaError);
+                
+                await chatwootService.logOutgoingMessage(
+                  result.phoneNumber,
+                  `[Media: ${attachment.type}] Failed to send`,
+                  null,
+                  "failed"
+                );
+              }
+            }
+          }
         } catch (error) {
           console.error(`[Webhook] Failed to send message for account ${accountId}:`, error);
           
-          await chatwootService.logOutgoingMessage(
-            result.phoneNumber,
-            result.content,
-            null,
-            "failed"
-          );
+          if (result.content) {
+            await chatwootService.logOutgoingMessage(
+              result.phoneNumber,
+              result.content,
+              null,
+              "failed"
+            );
+          }
         }
       }
 
