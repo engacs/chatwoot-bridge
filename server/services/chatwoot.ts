@@ -64,6 +64,58 @@ export class ChatwootService {
     }
   }
 
+  private async sendMessageWithAttachment(
+    conversationId: number,
+    content: string,
+    media: { buffer: Buffer; type: string; mimeType: string; fileName: string }
+  ): Promise<{ id: number } | null> {
+    const url = `${this.baseUrl}/api/v1/accounts/${this.accountId}/conversations/${conversationId}/messages`;
+    
+    try {
+      // Create form data manually for Node.js
+      const boundary = `----WebKitFormBoundary${Date.now().toString(16)}`;
+      const parts: Buffer[] = [];
+
+      // Add content field
+      parts.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="content"\r\n\r\n${content}\r\n`));
+      
+      // Add message_type field
+      parts.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="message_type"\r\n\r\nincoming\r\n`));
+      
+      // Add private field
+      parts.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="private"\r\n\r\nfalse\r\n`));
+      
+      // Add attachment
+      parts.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="attachments[]"; filename="${media.fileName}"\r\nContent-Type: ${media.mimeType}\r\n\r\n`));
+      parts.push(media.buffer);
+      parts.push(Buffer.from(`\r\n--${boundary}--\r\n`));
+
+      const body = Buffer.concat(parts);
+
+      const response = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": `multipart/form-data; boundary=${boundary}`,
+          "api_access_token": this.apiToken,
+        },
+        body,
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error(`[Chatwoot] Media upload error: ${response.status} - ${errorText}`);
+        return null;
+      }
+
+      const data = await response.json() as { id: number };
+      console.log(`[Chatwoot] Media message sent successfully: ${media.type} (${media.fileName})`);
+      return data;
+    } catch (error) {
+      console.error("[Chatwoot] Media upload failed:", error);
+      return null;
+    }
+  }
+
   private async findOrCreateContact(phoneNumber: string, name?: string): Promise<ChatwootContact | null> {
     const cleanPhone = phoneNumber.replace("@s.whatsapp.net", "").replace("@g.us", "");
     
@@ -136,8 +188,14 @@ export class ChatwootService {
     pushName: string | null;
     content: string;
     messageId?: string;
+    media?: {
+      buffer: Buffer;
+      type: string;
+      mimeType: string;
+      fileName: string;
+    };
   }): Promise<void> {
-    const { remoteJid, pushName, content, messageId } = params;
+    const { remoteJid, pushName, content, messageId, media } = params;
 
     if (messageId && this.processedMessages.has(messageId)) {
       console.log(`[Chatwoot] Message ${messageId} already processed, skipping`);
@@ -158,15 +216,26 @@ export class ChatwootService {
       return;
     }
 
-    const messageResult = await this.apiRequest<{ id: number }>(
-      "POST",
-      `/api/v1/accounts/${this.accountId}/conversations/${conversation.id}/messages`,
-      {
+    let messageResult: { id: number } | null = null;
+
+    if (media) {
+      // Use multipart form data for media messages
+      messageResult = await this.sendMessageWithAttachment(
+        conversation.id,
         content,
-        message_type: "incoming",
-        private: false,
-      }
-    );
+        media
+      );
+    } else {
+      messageResult = await this.apiRequest<{ id: number }>(
+        "POST",
+        `/api/v1/accounts/${this.accountId}/conversations/${conversation.id}/messages`,
+        {
+          content,
+          message_type: "incoming",
+          private: false,
+        }
+      );
+    }
 
     if (!messageResult) {
       console.error("[Chatwoot] Failed to send message");

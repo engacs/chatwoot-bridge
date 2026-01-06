@@ -4,7 +4,8 @@ import makeWASocket, {
   useMultiFileAuthState,
   makeCacheableSignalKeyStore,
   WASocket,
-  proto
+  proto,
+  downloadMediaMessage
 } from "@whiskeysockets/baileys";
 import { Boom } from "@hapi/boom";
 import QRCode from "qrcode";
@@ -168,12 +169,56 @@ export class ConnectionManager extends EventEmitter {
 
         console.log(`[ConnectionManager] Account ${accountId} incoming: ${remoteJid} - ${content.substring(0, 50)}`);
 
+        // Extract media if present
+        let mediaBuffer: Buffer | null = null;
+        let mediaType: string | null = null;
+        let mimeType: string | null = null;
+        let fileName: string | null = null;
+
+        try {
+          const message = msg.message;
+          if (message?.imageMessage) {
+            mediaBuffer = await downloadMediaMessage(msg, "buffer", {}) as Buffer;
+            mediaType = "image";
+            mimeType = message.imageMessage.mimetype || "image/jpeg";
+            fileName = `image_${Date.now()}.${mimeType.split("/")[1] || "jpg"}`;
+          } else if (message?.audioMessage) {
+            mediaBuffer = await downloadMediaMessage(msg, "buffer", {}) as Buffer;
+            mediaType = "audio";
+            mimeType = message.audioMessage.mimetype || "audio/ogg";
+            fileName = `audio_${Date.now()}.${message.audioMessage.ptt ? "ogg" : (mimeType.split("/")[1] || "ogg")}`;
+          } else if (message?.videoMessage) {
+            mediaBuffer = await downloadMediaMessage(msg, "buffer", {}) as Buffer;
+            mediaType = "video";
+            mimeType = message.videoMessage.mimetype || "video/mp4";
+            fileName = `video_${Date.now()}.${mimeType.split("/")[1] || "mp4"}`;
+          } else if (message?.documentMessage) {
+            mediaBuffer = await downloadMediaMessage(msg, "buffer", {}) as Buffer;
+            mediaType = "document";
+            mimeType = message.documentMessage.mimetype || "application/octet-stream";
+            fileName = message.documentMessage.fileName || `document_${Date.now()}`;
+          } else if (message?.stickerMessage) {
+            mediaBuffer = await downloadMediaMessage(msg, "buffer", {}) as Buffer;
+            mediaType = "sticker";
+            mimeType = message.stickerMessage.mimetype || "image/webp";
+            fileName = `sticker_${Date.now()}.webp`;
+          }
+        } catch (mediaError) {
+          console.error(`[ConnectionManager] Failed to download media for account ${accountId}:`, mediaError);
+        }
+
         try {
           await connData.chatwootService.handleIncomingMessage({
             remoteJid,
             pushName,
             content,
             messageId: msg.key.id || undefined,
+            media: mediaBuffer ? {
+              buffer: mediaBuffer,
+              type: mediaType!,
+              mimeType: mimeType!,
+              fileName: fileName!,
+            } : undefined,
           });
         } catch (error) {
           console.error(`[ConnectionManager] Failed to forward to Chatwoot for account ${accountId}:`, error);
