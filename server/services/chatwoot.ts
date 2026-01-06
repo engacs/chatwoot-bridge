@@ -6,6 +6,7 @@ interface ChatwootContact {
   name: string;
   phone_number: string;
   source_id: string;
+  identifier?: string;
 }
 
 interface ChatwootConversation {
@@ -146,26 +147,54 @@ export class ChatwootService {
     sourceId: string,
     contactId: number
   ): Promise<ChatwootConversation | null> {
+    const cleanPhone = sourceId.replace("@s.whatsapp.net", "").replace("@g.us", "");
+    
+    // Check cache first
     if (this.conversationCache.has(sourceId)) {
       const cachedId = this.conversationCache.get(sourceId)!;
+      // Still need to check if conversation needs to be reopened
+      await this.reopenConversationIfNeeded(cachedId);
       return { id: cachedId, inbox_id: parseInt(this.inboxId, 10), contact: {} as ChatwootContact };
     }
 
+    // Search for existing conversations with this contact in this inbox (including closed ones)
     const conversations = await this.apiRequest<{ payload: ChatwootConversation[] }>(
       "GET",
       `/api/v1/accounts/${this.accountId}/conversations?inbox_id=${this.inboxId}&status=all`
     );
 
     if (conversations?.payload) {
-      const existing = conversations.payload.find(
-        (conv) => conv.contact?.phone_number?.includes(sourceId.replace("@s.whatsapp.net", ""))
-      );
+      // Find conversation matching this phone number
+      const existing = conversations.payload.find((conv) => {
+        // Check by contact phone number
+        if (conv.contact?.phone_number?.includes(cleanPhone)) {
+          return true;
+        }
+        // Check by contact identifier
+        if (conv.contact?.identifier?.includes(cleanPhone)) {
+          return true;
+        }
+        // Also check contact_inbox source_id if available
+        const convSourceId = (conv as any).contact_inbox?.source_id;
+        if (convSourceId && convSourceId.includes(cleanPhone)) {
+          return true;
+        }
+        return false;
+      });
+
       if (existing) {
+        console.log(`[Chatwoot] Found existing conversation ${existing.id} for ${cleanPhone}`);
         this.conversationCache.set(sourceId, existing.id);
+        
+        // Reopen the conversation if it's closed/resolved
+        await this.reopenConversationIfNeeded(existing.id);
+        
         return existing;
       }
     }
 
+    // No existing conversation found - create a new one
+    console.log(`[Chatwoot] Creating new conversation for contact ${contactId} (${cleanPhone})`);
     const createResult = await this.apiRequest<ChatwootConversation>(
       "POST",
       `/api/v1/accounts/${this.accountId}/conversations`,
@@ -181,6 +210,28 @@ export class ChatwootService {
     }
 
     return createResult;
+  }
+
+  private async reopenConversationIfNeeded(conversationId: number): Promise<void> {
+    try {
+      // Get conversation status
+      const conversation = await this.apiRequest<{ status: string }>(
+        "GET",
+        `/api/v1/accounts/${this.accountId}/conversations/${conversationId}`
+      );
+
+      // If conversation is resolved/closed, reopen it
+      if (conversation && conversation.status === "resolved") {
+        console.log(`[Chatwoot] Reopening conversation ${conversationId}`);
+        await this.apiRequest(
+          "POST",
+          `/api/v1/accounts/${this.accountId}/conversations/${conversationId}/toggle_status`,
+          { status: "open" }
+        );
+      }
+    } catch (error) {
+      console.error(`[Chatwoot] Failed to check/reopen conversation ${conversationId}:`, error);
+    }
   }
 
   async handleIncomingMessage(params: {
