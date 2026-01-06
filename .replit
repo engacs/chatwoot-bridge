@@ -37,3 +37,10 @@ author = "agent"
 task = "shell.exec"
 args = "npm run dev"
 waitForPort = 5000
+
+[userenv]
+
+[userenv.shared]
+CHATWOOT_BASE_URL = "https://helpchat.yooltech.com"
+CHATWOOT_ACCOUNT_ID = "2"
+CHATWOOT_INBOX_ID = "7"
