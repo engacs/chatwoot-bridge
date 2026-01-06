@@ -1,0 +1,274 @@
+import { EventEmitter } from "events";
+import makeWASocket, { 
+  DisconnectReason, 
+  useMultiFileAuthState,
+  makeCacheableSignalKeyStore,
+  WASocket,
+  proto
+} from "@whiskeysockets/baileys";
+import { Boom } from "@hapi/boom";
+import QRCode from "qrcode";
+import pino from "pino";
+import path from "path";
+import fs from "fs/promises";
+import { storage } from "../storage";
+import type { WhatsappAccount, ChatwootConfig } from "@shared/schema";
+import { ChatwootService } from "./chatwoot";
+
+const logger = pino({ level: "warn" });
+
+interface WhatsAppConnection {
+  socket: WASocket | null;
+  chatwootService: ChatwootService | null;
+  reconnectAttempts: number;
+  maxReconnectAttempts: number;
+}
+
+export class ConnectionManager extends EventEmitter {
+  private connections: Map<number, WhatsAppConnection> = new Map();
+  private static instance: ConnectionManager;
+
+  private constructor() {
+    super();
+  }
+
+  static getInstance(): ConnectionManager {
+    if (!ConnectionManager.instance) {
+      ConnectionManager.instance = new ConnectionManager();
+    }
+    return ConnectionManager.instance;
+  }
+
+  async initializeAccount(accountId: number): Promise<void> {
+    const account = await storage.getWhatsappAccount(accountId);
+    if (!account) {
+      throw new Error(`Account ${accountId} not found`);
+    }
+
+    // Stop existing connection if any
+    await this.disconnectAccount(accountId);
+
+    const sessionDir = path.join(process.cwd(), "server", "sessions", account.sessionPath);
+    await fs.mkdir(sessionDir, { recursive: true });
+
+    const { state, saveCreds } = await useMultiFileAuthState(sessionDir);
+
+    await storage.updateWhatsappAccount(accountId, { status: "connecting" });
+    this.emit("status", accountId, "connecting");
+
+    const socket = makeWASocket({
+      auth: {
+        creds: state.creds,
+        keys: makeCacheableSignalKeyStore(state.keys, logger),
+      },
+      logger,
+      browser: ["WhatsApp-Chatwoot Bridge", "Chrome", "1.0.0"],
+      connectTimeoutMs: 60000,
+      keepAliveIntervalMs: 30000,
+      emitOwnEvents: false,
+      markOnlineOnConnect: true,
+    });
+
+    const connection: WhatsAppConnection = {
+      socket,
+      chatwootService: null,
+      reconnectAttempts: 0,
+      maxReconnectAttempts: 5,
+    };
+
+    this.connections.set(accountId, connection);
+
+    // Load Chatwoot config if exists
+    const chatwootConfig = await storage.getChatwootConfig(accountId);
+    if (chatwootConfig) {
+      connection.chatwootService = new ChatwootService(chatwootConfig, accountId);
+    }
+
+    socket.ev.on("creds.update", saveCreds);
+
+    socket.ev.on("connection.update", async (update) => {
+      const { connection: conn, lastDisconnect, qr } = update;
+
+      if (qr) {
+        try {
+          const qrDataUrl = await QRCode.toDataURL(qr);
+          await storage.updateWhatsappAccount(accountId, { 
+            status: "qr_ready", 
+            qrCode: qrDataUrl 
+          });
+          this.emit("status", accountId, "qr_ready");
+          this.emit("qr", accountId, qrDataUrl);
+        } catch (err) {
+          console.error(`[ConnectionManager] QR error for account ${accountId}:`, err);
+        }
+      }
+
+      if (conn === "close") {
+        const connData = this.connections.get(accountId);
+        if (!connData) return;
+
+        const shouldReconnect =
+          (lastDisconnect?.error as Boom)?.output?.statusCode !== DisconnectReason.loggedOut;
+
+        console.log(
+          `[ConnectionManager] Account ${accountId} closed. Status: ${
+            (lastDisconnect?.error as Boom)?.output?.statusCode
+          }. Reconnect: ${shouldReconnect}`
+        );
+
+        if (shouldReconnect && connData.reconnectAttempts < connData.maxReconnectAttempts) {
+          connData.reconnectAttempts++;
+          const delay = Math.min(1000 * Math.pow(2, connData.reconnectAttempts), 30000);
+          console.log(`[ConnectionManager] Account ${accountId} reconnecting... Attempt ${connData.reconnectAttempts}/${connData.maxReconnectAttempts}`);
+          
+          setTimeout(() => this.initializeAccount(accountId), delay);
+        } else {
+          await storage.updateWhatsappAccount(accountId, { 
+            status: "disconnected", 
+            qrCode: null 
+          });
+          this.emit("status", accountId, "disconnected");
+          this.connections.delete(accountId);
+        }
+      } else if (conn === "open") {
+        const connData = this.connections.get(accountId);
+        if (connData) {
+          connData.reconnectAttempts = 0;
+        }
+
+        const phoneNumber = socket.user?.id?.split(":")[0] || socket.user?.id?.split("@")[0] || null;
+        console.log(`[ConnectionManager] Account ${accountId} connected as ${phoneNumber}`);
+
+        await storage.updateWhatsappAccount(accountId, {
+          status: "connected",
+          qrCode: null,
+          phoneNumber,
+          lastConnectedAt: new Date(),
+        });
+
+        this.emit("status", accountId, "connected");
+      }
+    });
+
+    socket.ev.on("messages.upsert", async ({ messages, type }) => {
+      if (type !== "notify") return;
+
+      const connData = this.connections.get(accountId);
+      if (!connData?.chatwootService) return;
+
+      for (const msg of messages) {
+        if (msg.key.fromMe) continue;
+        if (!msg.message) continue;
+
+        const content = this.extractMessageContent(msg);
+        if (!content) continue;
+
+        const remoteJid = msg.key.remoteJid || "";
+        const pushName = msg.pushName || null;
+
+        console.log(`[ConnectionManager] Account ${accountId} incoming: ${remoteJid} - ${content.substring(0, 50)}`);
+
+        try {
+          await connData.chatwootService.handleIncomingMessage({
+            remoteJid,
+            pushName,
+            content,
+            messageId: msg.key.id || undefined,
+          });
+        } catch (error) {
+          console.error(`[ConnectionManager] Failed to forward to Chatwoot for account ${accountId}:`, error);
+        }
+      }
+    });
+  }
+
+  async disconnectAccount(accountId: number): Promise<void> {
+    const connData = this.connections.get(accountId);
+    if (connData?.socket) {
+      connData.socket.end(undefined);
+      this.connections.delete(accountId);
+    }
+    await storage.updateWhatsappAccount(accountId, { 
+      status: "disconnected", 
+      qrCode: null 
+    });
+    this.emit("status", accountId, "disconnected");
+  }
+
+  async sendMessage(accountId: number, remoteJid: string, content: string): Promise<{ key?: { id?: string | null } } | null> {
+    const connData = this.connections.get(accountId);
+    if (!connData?.socket) {
+      throw new Error(`Account ${accountId} not connected`);
+    }
+
+    const jid = remoteJid.includes("@") ? remoteJid : `${remoteJid}@s.whatsapp.net`;
+    
+    const result = await connData.socket.sendMessage(jid, { text: content });
+    console.log(`[ConnectionManager] Account ${accountId} sent to ${jid}: ${content.substring(0, 50)}`);
+    return result || null;
+  }
+
+  getConnection(accountId: number): WhatsAppConnection | undefined {
+    return this.connections.get(accountId);
+  }
+
+  isConnected(accountId: number): boolean {
+    const connData = this.connections.get(accountId);
+    return !!connData?.socket;
+  }
+
+  async updateChatwootConfig(accountId: number, config: ChatwootConfig): Promise<void> {
+    const connData = this.connections.get(accountId);
+    if (connData) {
+      connData.chatwootService = new ChatwootService(config, accountId);
+    }
+  }
+
+  private extractMessageContent(msg: proto.IWebMessageInfo): string | null {
+    const message = msg.message;
+    if (!message) return null;
+
+    if (message.conversation) {
+      return message.conversation;
+    }
+    if (message.extendedTextMessage?.text) {
+      return message.extendedTextMessage.text;
+    }
+    if (message.imageMessage?.caption) {
+      return `[Image] ${message.imageMessage.caption}`;
+    }
+    if (message.imageMessage) {
+      return "[Image]";
+    }
+    if (message.videoMessage?.caption) {
+      return `[Video] ${message.videoMessage.caption}`;
+    }
+    if (message.videoMessage) {
+      return "[Video]";
+    }
+    if (message.documentMessage) {
+      return `[Document] ${message.documentMessage.fileName || "file"}`;
+    }
+    if (message.audioMessage) {
+      return "[Audio]";
+    }
+    if (message.stickerMessage) {
+      return "[Sticker]";
+    }
+    if (message.contactMessage) {
+      return `[Contact] ${message.contactMessage.displayName}`;
+    }
+    if (message.locationMessage) {
+      return "[Location]";
+    }
+
+    return null;
+  }
+
+  async initializeAllAccounts(): Promise<void> {
+    // This would be called at server startup to restore all connected accounts
+    // For now, accounts are initialized on-demand when users access them
+  }
+}
+
+export const connectionManager = ConnectionManager.getInstance();

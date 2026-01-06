@@ -1,113 +1,329 @@
-import type { Express, Request, Response } from "express";
-import { createServer, type Server } from "http";
-import { storage } from "./storage";
-import { whatsappService } from "./services/whatsapp";
-import { chatwootService } from "./services/chatwoot";
-import { chatwootWebhookPayload } from "@shared/schema";
+import type { Express, Request, Response, NextFunction } from "express";
+import type { Server } from "http";
+import passport from "passport";
 import crypto from "crypto";
+import { z } from "zod";
+import { storage } from "./storage";
+import { setupAuth, hashPassword } from "./auth";
+import { connectionManager } from "./services/connection-manager";
+import { ChatwootService } from "./services/chatwoot";
+import { chatwootWebhookPayload, insertChatwootConfigSchema } from "@shared/schema";
 
-export async function registerRoutes(
-  httpServer: Server,
-  app: Express
-): Promise<Server> {
-  
-  const chatwootBaseUrl = process.env.CHATWOOT_BASE_URL;
-  const chatwootApiToken = process.env.CHATWOOT_API_TOKEN;
-  const chatwootInboxId = process.env.CHATWOOT_INBOX_ID;
-  const chatwootAccountId = process.env.CHATWOOT_ACCOUNT_ID;
-  const webhookSecret = process.env.CHATWOOT_WEBHOOK_SECRET;
-
-  if (chatwootBaseUrl && chatwootApiToken && chatwootInboxId && chatwootAccountId) {
-    chatwootService.configure(chatwootBaseUrl, chatwootApiToken, chatwootInboxId, chatwootAccountId);
+// Auth middleware
+function requireAuth(req: Request, res: Response, next: NextFunction) {
+  if (req.isAuthenticated()) {
+    return next();
   }
+  res.status(401).json({ error: "Not authenticated" });
+}
 
-  whatsappService.on("message", async (message) => {
-    console.log(`[Routes] Received WhatsApp message from ${message.remoteJid}`);
-    
-    if (chatwootService.isConfigured()) {
-      await chatwootService.sendMessageToChatwoot(
-        message.remoteJid,
-        message.remoteName,
-        message.content,
-        message.messageId
-      );
-    } else {
-      await storage.addMessageLog({
-        direction: "incoming",
-        remoteJid: message.remoteJid,
-        remoteName: message.remoteName,
-        chatwootMessageId: null,
-        whatsappMessageId: message.messageId,
-        content: message.content.substring(0, 200),
-        status: "pending",
-        timestamp: new Date().toISOString(),
+export async function registerRoutes(httpServer: Server, app: Express) {
+  // Setup authentication
+  setupAuth(app);
+
+  // ========== AUTH ROUTES ==========
+  
+  app.post("/api/auth/register", async (req: Request, res: Response) => {
+    try {
+      const { username, email, password } = req.body;
+      
+      if (!username || !email || !password) {
+        return res.status(400).json({ error: "Username, email, and password are required" });
+      }
+
+      if (password.length < 8) {
+        return res.status(400).json({ error: "Password must be at least 8 characters" });
+      }
+
+      // Check if user already exists
+      const existingUsername = await storage.getUserByUsername(username);
+      if (existingUsername) {
+        return res.status(400).json({ error: "Username already taken" });
+      }
+
+      const existingEmail = await storage.getUserByEmail(email);
+      if (existingEmail) {
+        return res.status(400).json({ error: "Email already registered" });
+      }
+
+      const hashedPassword = await hashPassword(password);
+      const user = await storage.createUser({
+        username,
+        email,
+        password: hashedPassword,
       });
-    }
-  });
 
-  whatsappService.on("status", (status) => {
-    console.log(`[Routes] WhatsApp status changed: ${status}`);
-  });
-
-  whatsappService.on("error", (error) => {
-    console.error(`[Routes] WhatsApp error: ${error}`);
-  });
-
-  // Auto-initialize WhatsApp on server startup to restore any existing session
-  (async () => {
-    try {
-      console.log("[Routes] Auto-initializing WhatsApp service...");
-      await whatsappService.initialize();
+      // Log the user in
+      req.login({ id: user.id, username: user.username, email: user.email }, (err) => {
+        if (err) {
+          return res.status(500).json({ error: "Failed to log in" });
+        }
+        res.json({ 
+          id: user.id, 
+          username: user.username, 
+          email: user.email 
+        });
+      });
     } catch (error) {
-      console.error("[Routes] Failed to auto-initialize WhatsApp:", error);
-    }
-  })();
-
-  app.get("/api/session", async (_req: Request, res: Response) => {
-    try {
-      const session = await storage.getSession();
-      res.json(session);
-    } catch (error) {
-      console.error("[API] Error getting session:", error);
-      res.status(500).json({ error: "Failed to get session" });
+      console.error("[Auth] Registration error:", error);
+      res.status(500).json({ error: "Registration failed" });
     }
   });
 
-  app.post("/api/session/connect", async (_req: Request, res: Response) => {
+  app.post("/api/auth/login", (req: Request, res: Response, next: NextFunction) => {
+    passport.authenticate("local", (err: Error | null, user: Express.User | false, info: { message: string }) => {
+      if (err) {
+        return res.status(500).json({ error: "Login failed" });
+      }
+      if (!user) {
+        return res.status(401).json({ error: info?.message || "Invalid credentials" });
+      }
+      req.login(user, (loginErr) => {
+        if (loginErr) {
+          return res.status(500).json({ error: "Login failed" });
+        }
+        res.json({ id: user.id, username: user.username, email: user.email });
+      });
+    })(req, res, next);
+  });
+
+  app.post("/api/auth/logout", (req: Request, res: Response) => {
+    req.logout((err) => {
+      if (err) {
+        return res.status(500).json({ error: "Logout failed" });
+      }
+      res.json({ success: true });
+    });
+  });
+
+  app.get("/api/auth/me", (req: Request, res: Response) => {
+    if (req.isAuthenticated()) {
+      res.json(req.user);
+    } else {
+      res.status(401).json({ error: "Not authenticated" });
+    }
+  });
+
+  // ========== WHATSAPP ACCOUNT ROUTES ==========
+
+  app.get("/api/whatsapp/accounts", requireAuth, async (req: Request, res: Response) => {
     try {
-      const session = await storage.getSession();
+      const accounts = await storage.getWhatsappAccountsByUser(req.user!.id);
+      res.json(accounts);
+    } catch (error) {
+      console.error("[API] Error getting accounts:", error);
+      res.status(500).json({ error: "Failed to get accounts" });
+    }
+  });
+
+  app.post("/api/whatsapp/accounts", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const { label } = req.body;
       
-      if (session.status === "connected") {
-        return res.json({ message: "Already connected", session });
+      if (!label) {
+        return res.status(400).json({ error: "Label is required" });
       }
 
-      if (session.status === "connecting" || session.status === "qr_ready") {
-        return res.json({ message: "Connection in progress", session });
+      // Generate unique session path
+      const sessionPath = `user_${req.user!.id}_${Date.now()}`;
+
+      const account = await storage.createWhatsappAccount({
+        userId: req.user!.id,
+        label,
+        sessionPath,
+      });
+
+      res.json(account);
+    } catch (error) {
+      console.error("[API] Error creating account:", error);
+      res.status(500).json({ error: "Failed to create account" });
+    }
+  });
+
+  app.get("/api/whatsapp/accounts/:id", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const accountId = parseInt(req.params.id);
+      const account = await storage.getWhatsappAccount(accountId);
+      
+      if (!account) {
+        return res.status(404).json({ error: "Account not found" });
+      }
+      
+      if (account.userId !== req.user!.id) {
+        return res.status(403).json({ error: "Access denied" });
       }
 
-      whatsappService.initialize();
-      
-      res.json({ message: "Connecting...", session: await storage.getSession() });
+      res.json(account);
     } catch (error) {
-      console.error("[API] Error connecting:", error);
+      console.error("[API] Error getting account:", error);
+      res.status(500).json({ error: "Failed to get account" });
+    }
+  });
+
+  app.delete("/api/whatsapp/accounts/:id", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const accountId = parseInt(req.params.id);
+      const account = await storage.getWhatsappAccount(accountId);
+      
+      if (!account) {
+        return res.status(404).json({ error: "Account not found" });
+      }
+      
+      if (account.userId !== req.user!.id) {
+        return res.status(403).json({ error: "Access denied" });
+      }
+
+      // Disconnect if connected
+      await connectionManager.disconnectAccount(accountId);
+      
+      // Delete from database
+      await storage.deleteWhatsappAccount(accountId);
+
+      res.json({ success: true });
+    } catch (error) {
+      console.error("[API] Error deleting account:", error);
+      res.status(500).json({ error: "Failed to delete account" });
+    }
+  });
+
+  // ========== WHATSAPP CONNECTION ROUTES ==========
+
+  app.post("/api/whatsapp/accounts/:id/connect", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const accountId = parseInt(req.params.id);
+      const account = await storage.getWhatsappAccount(accountId);
+      
+      if (!account) {
+        return res.status(404).json({ error: "Account not found" });
+      }
+      
+      if (account.userId !== req.user!.id) {
+        return res.status(403).json({ error: "Access denied" });
+      }
+
+      await connectionManager.initializeAccount(accountId);
+      res.json({ success: true, status: "connecting" });
+    } catch (error) {
+      console.error("[API] Error connecting account:", error);
       res.status(500).json({ error: "Failed to connect" });
     }
   });
 
-  app.post("/api/session/disconnect", async (_req: Request, res: Response) => {
+  app.post("/api/whatsapp/accounts/:id/disconnect", requireAuth, async (req: Request, res: Response) => {
     try {
-      await whatsappService.disconnect();
-      const session = await storage.getSession();
-      res.json({ message: "Disconnected", session });
+      const accountId = parseInt(req.params.id);
+      const account = await storage.getWhatsappAccount(accountId);
+      
+      if (!account) {
+        return res.status(404).json({ error: "Account not found" });
+      }
+      
+      if (account.userId !== req.user!.id) {
+        return res.status(403).json({ error: "Access denied" });
+      }
+
+      await connectionManager.disconnectAccount(accountId);
+      res.json({ success: true, status: "disconnected" });
     } catch (error) {
-      console.error("[API] Error disconnecting:", error);
+      console.error("[API] Error disconnecting account:", error);
       res.status(500).json({ error: "Failed to disconnect" });
     }
   });
 
-  app.get("/api/logs", async (_req: Request, res: Response) => {
+  // ========== CHATWOOT CONFIG ROUTES ==========
+
+  app.get("/api/whatsapp/accounts/:id/chatwoot", requireAuth, async (req: Request, res: Response) => {
     try {
-      const logs = await storage.getMessageLogs(100);
+      const accountId = parseInt(req.params.id);
+      const account = await storage.getWhatsappAccount(accountId);
+      
+      if (!account) {
+        return res.status(404).json({ error: "Account not found" });
+      }
+      
+      if (account.userId !== req.user!.id) {
+        return res.status(403).json({ error: "Access denied" });
+      }
+
+      const config = await storage.getChatwootConfig(accountId);
+      if (!config) {
+        return res.json({ configured: false });
+      }
+
+      // Don't expose the API token
+      res.json({
+        configured: true,
+        baseUrl: config.baseUrl,
+        inboxId: config.inboxId,
+        accountId: config.accountId,
+        hasWebhookSecret: !!config.webhookSecret,
+      });
+    } catch (error) {
+      console.error("[API] Error getting Chatwoot config:", error);
+      res.status(500).json({ error: "Failed to get config" });
+    }
+  });
+
+  app.post("/api/whatsapp/accounts/:id/chatwoot", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const accountId = parseInt(req.params.id);
+      const account = await storage.getWhatsappAccount(accountId);
+      
+      if (!account) {
+        return res.status(404).json({ error: "Account not found" });
+      }
+      
+      if (account.userId !== req.user!.id) {
+        return res.status(403).json({ error: "Access denied" });
+      }
+
+      const { baseUrl, apiToken, inboxId, accountId: chatwootAccountId, webhookSecret } = req.body;
+
+      if (!baseUrl || !apiToken || !inboxId || !chatwootAccountId) {
+        return res.status(400).json({ error: "All Chatwoot fields are required" });
+      }
+
+      const config = await storage.upsertChatwootConfig({
+        whatsappAccountId: accountId,
+        baseUrl,
+        apiToken,
+        inboxId,
+        accountId: chatwootAccountId,
+        webhookSecret: webhookSecret || null,
+      });
+
+      // Update connection manager with new config
+      await connectionManager.updateChatwootConfig(accountId, config);
+
+      res.json({ 
+        success: true,
+        configured: true,
+        baseUrl: config.baseUrl,
+        inboxId: config.inboxId,
+        accountId: config.accountId,
+      });
+    } catch (error) {
+      console.error("[API] Error saving Chatwoot config:", error);
+      res.status(500).json({ error: "Failed to save config" });
+    }
+  });
+
+  // ========== MESSAGE LOGS ROUTE ==========
+
+  app.get("/api/whatsapp/accounts/:id/logs", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const accountId = parseInt(req.params.id);
+      const account = await storage.getWhatsappAccount(accountId);
+      
+      if (!account) {
+        return res.status(404).json({ error: "Account not found" });
+      }
+      
+      if (account.userId !== req.user!.id) {
+        return res.status(403).json({ error: "Access denied" });
+      }
+
+      const logs = await storage.getMessageLogs(accountId, 100);
       res.json(logs);
     } catch (error) {
       console.error("[API] Error getting logs:", error);
@@ -115,107 +331,98 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/webhooks", async (_req: Request, res: Response) => {
-    try {
-      const events = await storage.getWebhookEvents(50);
-      res.json(events);
-    } catch (error) {
-      console.error("[API] Error getting webhook events:", error);
-      res.status(500).json({ error: "Failed to get webhook events" });
-    }
-  });
+  // ========== WEBHOOK ROUTE ==========
 
-  app.get("/api/chatwoot/config", (_req: Request, res: Response) => {
-    const config = chatwootService.getConfig();
-    res.json(config);
-  });
-
-  app.post("/api/webhook/chatwoot", async (req: Request, res: Response) => {
+  app.post("/api/webhook/chatwoot/:accountId", async (req: Request, res: Response) => {
     try {
-      const signature = req.headers["x-chatwoot-signature"] as string | undefined;
+      const accountId = parseInt(req.params.accountId);
       
-      // If webhook secret is configured, require and validate signature
-      if (webhookSecret) {
+      const account = await storage.getWhatsappAccount(accountId);
+      if (!account) {
+        return res.status(404).json({ error: "Account not found" });
+      }
+
+      const chatwootConfig = await storage.getChatwootConfig(accountId);
+      if (!chatwootConfig) {
+        return res.status(400).json({ error: "Chatwoot not configured for this account" });
+      }
+
+      // Validate webhook signature if secret is configured
+      const signature = req.headers["x-chatwoot-signature"] as string | undefined;
+      if (chatwootConfig.webhookSecret) {
         if (!signature) {
-          console.warn("[Webhook] Missing signature header when secret is configured");
+          console.warn(`[Webhook] Missing signature for account ${accountId}`);
           return res.status(401).json({ error: "Missing signature" });
         }
         
         const expectedSignature = crypto
-          .createHmac("sha256", webhookSecret)
+          .createHmac("sha256", chatwootConfig.webhookSecret)
           .update(JSON.stringify(req.body))
           .digest("hex");
         
         if (signature !== expectedSignature) {
-          console.warn("[Webhook] Invalid signature");
+          console.warn(`[Webhook] Invalid signature for account ${accountId}`);
           return res.status(401).json({ error: "Invalid signature" });
         }
       }
 
       const parseResult = chatwootWebhookPayload.safeParse(req.body);
-      
       if (!parseResult.success) {
         console.warn("[Webhook] Invalid payload:", parseResult.error);
-        await storage.addWebhookEvent({
-          eventType: req.body?.event || "unknown",
-          payload: req.body,
-          processedAt: new Date().toISOString(),
-          success: false,
-          error: "Invalid payload format",
-        });
-        return res.status(400).json({ error: "Invalid payload" });
+        return res.status(400).json({ error: "Invalid webhook payload" });
       }
 
-      const payload = parseResult.data;
-      console.log(`[Webhook] Received event: ${payload.event}`);
-
+      // Log webhook event
       await storage.addWebhookEvent({
-        eventType: payload.event,
+        whatsappAccountId: accountId,
+        eventType: parseResult.data.event,
         payload: req.body,
-        processedAt: new Date().toISOString(),
         success: true,
         error: null,
       });
 
-      const result = await chatwootService.processWebhook(payload);
+      // Process the webhook
+      const chatwootService = new ChatwootService(chatwootConfig, accountId);
+      const result = await chatwootService.processWebhook(parseResult.data);
 
       if (result.shouldReply && result.phoneNumber && result.content) {
-        console.log(`[Webhook] Sending reply to ${result.phoneNumber}`);
-        
-        const waResult = await whatsappService.sendMessage(result.phoneNumber, result.content);
-        
-        await chatwootService.logOutgoingMessage(
-          result.phoneNumber,
-          result.content,
-          waResult?.key?.id || null,
-          waResult ? "sent" : "failed"
-        );
+        try {
+          const msgResult = await connectionManager.sendMessage(
+            accountId,
+            result.phoneNumber,
+            result.content
+          );
+
+          await chatwootService.logOutgoingMessage(
+            result.phoneNumber,
+            result.content,
+            msgResult?.key?.id || null,
+            "sent"
+          );
+
+          console.log(`[Webhook] Account ${accountId} sent message to ${result.phoneNumber}`);
+        } catch (error) {
+          console.error(`[Webhook] Failed to send message for account ${accountId}:`, error);
+          
+          await chatwootService.logOutgoingMessage(
+            result.phoneNumber,
+            result.content,
+            null,
+            "failed"
+          );
+        }
       }
 
       res.json({ success: true });
     } catch (error) {
-      console.error("[Webhook] Error processing:", error);
-      
-      await storage.addWebhookEvent({
-        eventType: req.body?.event || "error",
-        payload: req.body,
-        processedAt: new Date().toISOString(),
-        success: false,
-        error: error instanceof Error ? error.message : "Unknown error",
-      });
-      
-      res.status(500).json({ error: "Internal server error" });
+      console.error("[Webhook] Error:", error);
+      res.status(500).json({ error: "Webhook processing failed" });
     }
   });
 
-  app.get("/api/health", (_req: Request, res: Response) => {
-    res.json({
-      status: "ok",
-      whatsapp: whatsappService.isConnected() ? "connected" : "disconnected",
-      chatwoot: chatwootService.isConfigured() ? "configured" : "not_configured",
-      timestamp: new Date().toISOString(),
-    });
-  });
+  // ========== HEALTH CHECK ==========
 
-  return httpServer;
+  app.get("/api/health", (_req: Request, res: Response) => {
+    res.json({ status: "ok", timestamp: new Date().toISOString() });
+  });
 }

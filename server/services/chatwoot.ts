@@ -1,5 +1,5 @@
 import { storage } from "../storage";
-import type { ChatwootWebhookPayload, MessageLog } from "@shared/schema";
+import type { ChatwootWebhookPayload, ChatwootConfig } from "@shared/schema";
 
 interface ChatwootContact {
   id: number;
@@ -14,33 +14,22 @@ interface ChatwootConversation {
   contact: ChatwootContact;
 }
 
-class ChatwootService {
-  private baseUrl: string | null = null;
-  private apiToken: string | null = null;
-  private inboxId: string | null = null;
-  private accountId: string | null = null;
+export class ChatwootService {
+  private baseUrl: string;
+  private apiToken: string;
+  private inboxId: string;
+  private accountId: string;
+  private whatsappAccountId: number;
   private conversationCache: Map<string, number> = new Map();
   private processedMessages: Set<string> = new Set();
 
-  configure(baseUrl: string, apiToken: string, inboxId: string, accountId: string) {
-    this.baseUrl = baseUrl.replace(/\/$/, "");
-    this.apiToken = apiToken;
-    this.inboxId = inboxId;
-    this.accountId = accountId;
-    console.log(`[Chatwoot] Configured with base URL: ${this.baseUrl}, inbox: ${this.inboxId}`);
-  }
-
-  isConfigured(): boolean {
-    return !!(this.baseUrl && this.apiToken && this.inboxId && this.accountId);
-  }
-
-  getConfig() {
-    return {
-      baseUrl: this.baseUrl,
-      inboxId: this.inboxId,
-      accountId: this.accountId,
-      isConfigured: this.isConfigured(),
-    };
+  constructor(config: ChatwootConfig, whatsappAccountId: number) {
+    this.baseUrl = config.baseUrl.replace(/\/$/, "");
+    this.apiToken = config.apiToken;
+    this.inboxId = config.inboxId;
+    this.accountId = config.accountId;
+    this.whatsappAccountId = whatsappAccountId;
+    console.log(`[Chatwoot] Service created for account ${whatsappAccountId}: ${this.baseUrl}, inbox: ${this.inboxId}`);
   }
 
   private async apiRequest<T>(
@@ -48,11 +37,6 @@ class ChatwootService {
     endpoint: string,
     body?: Record<string, unknown>
   ): Promise<T | null> {
-    if (!this.baseUrl || !this.apiToken) {
-      console.error("[Chatwoot] Not configured");
-      return null;
-    }
-
     const url = `${this.baseUrl}${endpoint}`;
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
@@ -96,7 +80,7 @@ class ChatwootService {
       "POST",
       `/api/v1/accounts/${this.accountId}/contacts`,
       {
-        inbox_id: parseInt(this.inboxId!, 10),
+        inbox_id: parseInt(this.inboxId, 10),
         name: name || `WhatsApp ${cleanPhone}`,
         phone_number: `+${cleanPhone}`,
         identifier: cleanPhone,
@@ -112,7 +96,7 @@ class ChatwootService {
   ): Promise<ChatwootConversation | null> {
     if (this.conversationCache.has(sourceId)) {
       const cachedId = this.conversationCache.get(sourceId)!;
-      return { id: cachedId, inbox_id: parseInt(this.inboxId!, 10), contact: {} as ChatwootContact };
+      return { id: cachedId, inbox_id: parseInt(this.inboxId, 10), contact: {} as ChatwootContact };
     }
 
     const conversations = await this.apiRequest<{ payload: ChatwootConversation[] }>(
@@ -134,7 +118,7 @@ class ChatwootService {
       "POST",
       `/api/v1/accounts/${this.accountId}/conversations`,
       {
-        inbox_id: parseInt(this.inboxId!, 10),
+        inbox_id: parseInt(this.inboxId, 10),
         contact_id: contactId,
         source_id: sourceId,
       }
@@ -147,34 +131,31 @@ class ChatwootService {
     return createResult;
   }
 
-  async sendMessageToChatwoot(
-    remoteJid: string,
-    remoteName: string | null,
-    content: string,
-    whatsappMessageId: string
-  ): Promise<MessageLog | null> {
-    if (!this.isConfigured()) {
-      console.error("[Chatwoot] Not configured, cannot send message");
-      return null;
-    }
+  async handleIncomingMessage(params: {
+    remoteJid: string;
+    pushName: string | null;
+    content: string;
+    messageId?: string;
+  }): Promise<void> {
+    const { remoteJid, pushName, content, messageId } = params;
 
-    if (this.processedMessages.has(whatsappMessageId)) {
-      console.log(`[Chatwoot] Message ${whatsappMessageId} already processed, skipping`);
-      return null;
+    if (messageId && this.processedMessages.has(messageId)) {
+      console.log(`[Chatwoot] Message ${messageId} already processed, skipping`);
+      return;
     }
 
     const cleanPhone = remoteJid.replace("@s.whatsapp.net", "").replace("@g.us", "");
     
-    const contact = await this.findOrCreateContact(cleanPhone, remoteName || undefined);
+    const contact = await this.findOrCreateContact(cleanPhone, pushName || undefined);
     if (!contact) {
       console.error("[Chatwoot] Failed to create/find contact");
-      return null;
+      return;
     }
 
     const conversation = await this.findOrCreateConversation(remoteJid, contact.id);
     if (!conversation) {
       console.error("[Chatwoot] Failed to create/find conversation");
-      return null;
+      return;
     }
 
     const messageResult = await this.apiRequest<{ id: number }>(
@@ -189,29 +170,30 @@ class ChatwootService {
 
     if (!messageResult) {
       console.error("[Chatwoot] Failed to send message");
-      return null;
+      return;
     }
 
-    this.processedMessages.add(whatsappMessageId);
+    if (messageId) {
+      this.processedMessages.add(messageId);
+    }
 
     if (this.processedMessages.size > 10000) {
       const entries = Array.from(this.processedMessages);
       this.processedMessages = new Set(entries.slice(-5000));
     }
 
-    const log = await storage.addMessageLog({
+    await storage.addMessageLog({
+      whatsappAccountId: this.whatsappAccountId,
       direction: "incoming",
       remoteJid,
-      remoteName,
+      remoteName: pushName,
       chatwootMessageId: String(messageResult.id),
-      whatsappMessageId,
+      whatsappMessageId: messageId || null,
       content: content.substring(0, 200),
       status: "delivered",
-      timestamp: new Date().toISOString(),
     });
 
     console.log(`[Chatwoot] Message sent to conversation ${conversation.id}`);
-    return log;
   }
 
   async processWebhook(payload: ChatwootWebhookPayload): Promise<{
@@ -235,7 +217,7 @@ class ChatwootService {
     const conversationId = payload.conversation?.id;
     const inboxId = payload.conversation?.inbox_id;
 
-    if (inboxId !== parseInt(this.inboxId!, 10)) {
+    if (inboxId !== parseInt(this.inboxId, 10)) {
       return { shouldReply: false };
     }
 
@@ -267,8 +249,9 @@ class ChatwootService {
     content: string,
     whatsappMessageId: string | null,
     status: "sent" | "failed"
-  ): Promise<MessageLog> {
-    return storage.addMessageLog({
+  ): Promise<void> {
+    await storage.addMessageLog({
+      whatsappAccountId: this.whatsappAccountId,
       direction: "outgoing",
       remoteJid: `${phoneNumber}@s.whatsapp.net`,
       remoteName: null,
@@ -276,9 +259,6 @@ class ChatwootService {
       whatsappMessageId,
       content: content.substring(0, 200),
       status,
-      timestamp: new Date().toISOString(),
     });
   }
 }
-
-export const chatwootService = new ChatwootService();

@@ -44,3 +44,6 @@ waitForPort = 5000
 CHATWOOT_BASE_URL = "https://helpchat.yooltech.com"
 CHATWOOT_ACCOUNT_ID = "2"
 CHATWOOT_INBOX_ID = "7"
+
+[agent]
+integrations = ["javascript_database:1.0.0"]

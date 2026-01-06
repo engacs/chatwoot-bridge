@@ -1,120 +1,158 @@
-import { type User, type InsertUser, type WhatsAppSession, type MessageLog, type WebhookEvent, type ConnectionStatus } from "@shared/schema";
-import { randomUUID } from "crypto";
+import { 
+  users, type User, type InsertUser, 
+  whatsappAccounts, type WhatsappAccount, type InsertWhatsappAccount,
+  chatwootConfigs, type ChatwootConfig, type InsertChatwootConfig,
+  messageLogs, type MessageLog,
+  webhookEvents, type WebhookEvent
+} from "@shared/schema";
+import { db } from "./db";
+import { eq, desc, and } from "drizzle-orm";
 
 export interface IStorage {
-  getUser(id: string): Promise<User | undefined>;
+  // Users
+  getUser(id: number): Promise<User | undefined>;
   getUserByUsername(username: string): Promise<User | undefined>;
+  getUserByEmail(email: string): Promise<User | undefined>;
   createUser(user: InsertUser): Promise<User>;
   
-  getSession(): Promise<WhatsAppSession>;
-  updateSession(updates: Partial<WhatsAppSession>): Promise<WhatsAppSession>;
+  // WhatsApp Accounts
+  getWhatsappAccount(id: number): Promise<WhatsappAccount | undefined>;
+  getWhatsappAccountsByUser(userId: number): Promise<WhatsappAccount[]>;
+  createWhatsappAccount(account: InsertWhatsappAccount & { sessionPath: string }): Promise<WhatsappAccount>;
+  updateWhatsappAccount(id: number, updates: Partial<WhatsappAccount>): Promise<WhatsappAccount | undefined>;
+  deleteWhatsappAccount(id: number): Promise<boolean>;
   
-  getMessageLogs(limit?: number): Promise<MessageLog[]>;
-  addMessageLog(log: Omit<MessageLog, "id">): Promise<MessageLog>;
-  updateMessageLog(id: string, updates: Partial<MessageLog>): Promise<MessageLog | undefined>;
-  getMessageByWhatsAppId(whatsappId: string): Promise<MessageLog | undefined>;
-  getMessageByChatwootId(chatwootId: string): Promise<MessageLog | undefined>;
+  // Chatwoot Configs
+  getChatwootConfig(whatsappAccountId: number): Promise<ChatwootConfig | undefined>;
+  upsertChatwootConfig(config: InsertChatwootConfig): Promise<ChatwootConfig>;
+  deleteChatwootConfig(whatsappAccountId: number): Promise<boolean>;
   
-  getWebhookEvents(limit?: number): Promise<WebhookEvent[]>;
-  addWebhookEvent(event: Omit<WebhookEvent, "id">): Promise<WebhookEvent>;
+  // Message Logs
+  getMessageLogs(whatsappAccountId: number, limit?: number): Promise<MessageLog[]>;
+  addMessageLog(log: Omit<MessageLog, "id" | "createdAt">): Promise<MessageLog>;
+  getMessageByWhatsAppId(whatsappAccountId: number, whatsappId: string): Promise<MessageLog | undefined>;
+  
+  // Webhook Events
+  getWebhookEvents(whatsappAccountId: number, limit?: number): Promise<WebhookEvent[]>;
+  addWebhookEvent(event: Omit<WebhookEvent, "id" | "processedAt">): Promise<WebhookEvent>;
 }
 
-export class MemStorage implements IStorage {
-  private users: Map<string, User>;
-  private session: WhatsAppSession;
-  private messageLogs: MessageLog[];
-  private webhookEvents: WebhookEvent[];
-
-  constructor() {
-    this.users = new Map();
-    this.session = {
-      id: "default",
-      status: "disconnected",
-      qrCode: null,
-      phoneNumber: null,
-      lastConnectedAt: null,
-      connectedSince: null,
-    };
-    this.messageLogs = [];
-    this.webhookEvents = [];
-  }
-
-  async getUser(id: string): Promise<User | undefined> {
-    return this.users.get(id);
+export class DatabaseStorage implements IStorage {
+  // Users
+  async getUser(id: number): Promise<User | undefined> {
+    const [user] = await db.select().from(users).where(eq(users.id, id));
+    return user || undefined;
   }
 
   async getUserByUsername(username: string): Promise<User | undefined> {
-    return Array.from(this.users.values()).find(
-      (user) => user.username === username,
-    );
+    const [user] = await db.select().from(users).where(eq(users.username, username));
+    return user || undefined;
+  }
+
+  async getUserByEmail(email: string): Promise<User | undefined> {
+    const [user] = await db.select().from(users).where(eq(users.email, email));
+    return user || undefined;
   }
 
   async createUser(insertUser: InsertUser): Promise<User> {
-    const id = randomUUID();
-    const user: User = { ...insertUser, id };
-    this.users.set(id, user);
+    const [user] = await db.insert(users).values(insertUser).returning();
     return user;
   }
 
-  async getSession(): Promise<WhatsAppSession> {
-    return { ...this.session };
+  // WhatsApp Accounts
+  async getWhatsappAccount(id: number): Promise<WhatsappAccount | undefined> {
+    const [account] = await db.select().from(whatsappAccounts).where(eq(whatsappAccounts.id, id));
+    return account || undefined;
   }
 
-  async updateSession(updates: Partial<WhatsAppSession>): Promise<WhatsAppSession> {
-    this.session = { ...this.session, ...updates };
-    return { ...this.session };
+  async getWhatsappAccountsByUser(userId: number): Promise<WhatsappAccount[]> {
+    return db.select().from(whatsappAccounts).where(eq(whatsappAccounts.userId, userId));
   }
 
-  async getMessageLogs(limit: number = 100): Promise<MessageLog[]> {
-    return [...this.messageLogs]
-      .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
-      .slice(0, limit);
+  async createWhatsappAccount(account: InsertWhatsappAccount & { sessionPath: string }): Promise<WhatsappAccount> {
+    const [created] = await db.insert(whatsappAccounts).values(account).returning();
+    return created;
   }
 
-  async addMessageLog(log: Omit<MessageLog, "id">): Promise<MessageLog> {
-    const messageLog: MessageLog = {
-      ...log,
-      id: randomUUID(),
-    };
-    this.messageLogs.push(messageLog);
-    if (this.messageLogs.length > 1000) {
-      this.messageLogs = this.messageLogs.slice(-500);
+  async updateWhatsappAccount(id: number, updates: Partial<WhatsappAccount>): Promise<WhatsappAccount | undefined> {
+    const [updated] = await db
+      .update(whatsappAccounts)
+      .set({ ...updates, updatedAt: new Date() })
+      .where(eq(whatsappAccounts.id, id))
+      .returning();
+    return updated || undefined;
+  }
+
+  async deleteWhatsappAccount(id: number): Promise<boolean> {
+    const result = await db.delete(whatsappAccounts).where(eq(whatsappAccounts.id, id)).returning();
+    return result.length > 0;
+  }
+
+  // Chatwoot Configs
+  async getChatwootConfig(whatsappAccountId: number): Promise<ChatwootConfig | undefined> {
+    const [config] = await db.select().from(chatwootConfigs).where(eq(chatwootConfigs.whatsappAccountId, whatsappAccountId));
+    return config || undefined;
+  }
+
+  async upsertChatwootConfig(config: InsertChatwootConfig): Promise<ChatwootConfig> {
+    const existing = await this.getChatwootConfig(config.whatsappAccountId);
+    if (existing) {
+      const [updated] = await db
+        .update(chatwootConfigs)
+        .set({ ...config, updatedAt: new Date() })
+        .where(eq(chatwootConfigs.whatsappAccountId, config.whatsappAccountId))
+        .returning();
+      return updated;
     }
-    return messageLog;
+    const [created] = await db.insert(chatwootConfigs).values(config).returning();
+    return created;
   }
 
-  async updateMessageLog(id: string, updates: Partial<MessageLog>): Promise<MessageLog | undefined> {
-    const index = this.messageLogs.findIndex(log => log.id === id);
-    if (index === -1) return undefined;
-    this.messageLogs[index] = { ...this.messageLogs[index], ...updates };
-    return { ...this.messageLogs[index] };
+  async deleteChatwootConfig(whatsappAccountId: number): Promise<boolean> {
+    const result = await db.delete(chatwootConfigs).where(eq(chatwootConfigs.whatsappAccountId, whatsappAccountId)).returning();
+    return result.length > 0;
   }
 
-  async getMessageByWhatsAppId(whatsappId: string): Promise<MessageLog | undefined> {
-    return this.messageLogs.find(log => log.whatsappMessageId === whatsappId);
+  // Message Logs
+  async getMessageLogs(whatsappAccountId: number, limit: number = 100): Promise<MessageLog[]> {
+    return db
+      .select()
+      .from(messageLogs)
+      .where(eq(messageLogs.whatsappAccountId, whatsappAccountId))
+      .orderBy(desc(messageLogs.createdAt))
+      .limit(limit);
   }
 
-  async getMessageByChatwootId(chatwootId: string): Promise<MessageLog | undefined> {
-    return this.messageLogs.find(log => log.chatwootMessageId === chatwootId);
+  async addMessageLog(log: Omit<MessageLog, "id" | "createdAt">): Promise<MessageLog> {
+    const [created] = await db.insert(messageLogs).values(log).returning();
+    return created;
   }
 
-  async getWebhookEvents(limit: number = 50): Promise<WebhookEvent[]> {
-    return [...this.webhookEvents]
-      .sort((a, b) => new Date(b.processedAt).getTime() - new Date(a.processedAt).getTime())
-      .slice(0, limit);
+  async getMessageByWhatsAppId(whatsappAccountId: number, whatsappId: string): Promise<MessageLog | undefined> {
+    const [log] = await db
+      .select()
+      .from(messageLogs)
+      .where(and(
+        eq(messageLogs.whatsappAccountId, whatsappAccountId),
+        eq(messageLogs.whatsappMessageId, whatsappId)
+      ));
+    return log || undefined;
   }
 
-  async addWebhookEvent(event: Omit<WebhookEvent, "id">): Promise<WebhookEvent> {
-    const webhookEvent: WebhookEvent = {
-      ...event,
-      id: randomUUID(),
-    };
-    this.webhookEvents.push(webhookEvent);
-    if (this.webhookEvents.length > 500) {
-      this.webhookEvents = this.webhookEvents.slice(-250);
-    }
-    return webhookEvent;
+  // Webhook Events
+  async getWebhookEvents(whatsappAccountId: number, limit: number = 50): Promise<WebhookEvent[]> {
+    return db
+      .select()
+      .from(webhookEvents)
+      .where(eq(webhookEvents.whatsappAccountId, whatsappAccountId))
+      .orderBy(desc(webhookEvents.processedAt))
+      .limit(limit);
+  }
+
+  async addWebhookEvent(event: Omit<WebhookEvent, "id" | "processedAt">): Promise<WebhookEvent> {
+    const [created] = await db.insert(webhookEvents).values(event).returning();
+    return created;
   }
 }
 
-export const storage = new MemStorage();
+export const storage = new DatabaseStorage();
