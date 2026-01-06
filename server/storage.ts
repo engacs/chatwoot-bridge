@@ -18,6 +18,7 @@ export interface IStorage {
   // WhatsApp Accounts
   getWhatsappAccount(id: number): Promise<WhatsappAccount | undefined>;
   getWhatsappAccountsByUser(userId: number): Promise<WhatsappAccount[]>;
+  getAllWhatsappAccounts(): Promise<WhatsappAccount[]>;
   createWhatsappAccount(account: InsertWhatsappAccount & { sessionPath: string }): Promise<WhatsappAccount>;
   updateWhatsappAccount(id: number, updates: Partial<WhatsappAccount>): Promise<WhatsappAccount | undefined>;
   deleteWhatsappAccount(id: number): Promise<boolean>;
@@ -67,6 +68,10 @@ export class DatabaseStorage implements IStorage {
 
   async getWhatsappAccountsByUser(userId: number): Promise<WhatsappAccount[]> {
     return db.select().from(whatsappAccounts).where(eq(whatsappAccounts.userId, userId));
+  }
+
+  async getAllWhatsappAccounts(): Promise<WhatsappAccount[]> {
+    return db.select().from(whatsappAccounts);
   }
 
   async createWhatsappAccount(account: InsertWhatsappAccount & { sessionPath: string }): Promise<WhatsappAccount> {

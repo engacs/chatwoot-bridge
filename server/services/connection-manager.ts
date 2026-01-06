@@ -266,8 +266,28 @@ export class ConnectionManager extends EventEmitter {
   }
 
   async initializeAllAccounts(): Promise<void> {
-    // This would be called at server startup to restore all connected accounts
-    // For now, accounts are initialized on-demand when users access them
+    // Restore all previously connected accounts on server startup
+    try {
+      const allAccounts = await storage.getAllWhatsappAccounts();
+      const connectedAccounts = allAccounts.filter(
+        (account: WhatsappAccount) => account.status === "connected" || account.lastConnectedAt
+      );
+
+      console.log(`[ConnectionManager] Restoring ${connectedAccounts.length} WhatsApp connections...`);
+
+      for (const account of connectedAccounts) {
+        try {
+          console.log(`[ConnectionManager] Initializing account ${account.id} (${account.label})`);
+          await this.initializeAccount(account.id);
+        } catch (error) {
+          console.error(`[ConnectionManager] Failed to restore account ${account.id}:`, error);
+          // Update status to disconnected if restoration fails
+          await storage.updateWhatsappAccount(account.id, { status: "disconnected" });
+        }
+      }
+    } catch (error) {
+      console.error("[ConnectionManager] Failed to restore accounts:", error);
+    }
   }
 }
 

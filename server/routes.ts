@@ -21,6 +21,11 @@ export async function registerRoutes(httpServer: Server, app: Express) {
   // Setup authentication
   setupAuth(app);
 
+  // Initialize all WhatsApp accounts on startup
+  connectionManager.initializeAllAccounts().catch((err) => {
+    console.error("[Startup] Failed to initialize WhatsApp accounts:", err);
+  });
+
   // ========== AUTH ROUTES ==========
   
   app.post("/api/auth/register", async (req: Request, res: Response) => {
