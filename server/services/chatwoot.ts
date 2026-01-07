@@ -117,7 +117,7 @@ export class ChatwootService {
     }
   }
 
-  private async findOrCreateContact(phoneNumber: string, name?: string): Promise<ChatwootContact | null> {
+  private async findOrCreateContact(phoneNumber: string, name?: string, avatarUrl?: string): Promise<ChatwootContact | null> {
     const cleanPhone = phoneNumber.replace("@s.whatsapp.net", "").replace("@g.us", "");
     
     const searchResult = await this.apiRequest<{ payload: ChatwootContact[] }>(
@@ -126,7 +126,14 @@ export class ChatwootService {
     );
 
     if (searchResult?.payload?.length) {
-      return searchResult.payload[0];
+      const existingContact = searchResult.payload[0];
+      
+      // Update contact name if we have a better name
+      if (name && name !== existingContact.name && !existingContact.name.includes(name)) {
+        await this.updateContact(existingContact.id, { name });
+      }
+      
+      return existingContact;
     }
 
     const createResult = await this.apiRequest<{ payload: { contact: ChatwootContact } }>(
@@ -141,6 +148,63 @@ export class ChatwootService {
     );
 
     return createResult?.payload?.contact || null;
+  }
+
+  async updateContact(contactId: number, updates: { name?: string; avatar_url?: string }): Promise<void> {
+    try {
+      await this.apiRequest(
+        "PUT",
+        `/api/v1/accounts/${this.accountId}/contacts/${contactId}`,
+        updates
+      );
+      console.log(`[Chatwoot] Updated contact ${contactId} with:`, Object.keys(updates));
+    } catch (error) {
+      console.error(`[Chatwoot] Failed to update contact ${contactId}:`, error);
+    }
+  }
+
+  async updateContactAvatar(contactId: number, avatarUrl: string): Promise<void> {
+    try {
+      // Download the image and upload to Chatwoot
+      const response = await fetch(avatarUrl);
+      if (!response.ok) {
+        console.error(`[Chatwoot] Failed to download avatar: ${response.status}`);
+        return;
+      }
+      
+      const buffer = Buffer.from(await response.arrayBuffer());
+      const contentType = response.headers.get("content-type") || "image/jpeg";
+      
+      // Upload avatar using multipart form
+      const boundary = `----WebKitFormBoundary${Date.now().toString(16)}`;
+      const parts: Buffer[] = [];
+      
+      parts.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="avatar"; filename="avatar.jpg"\r\nContent-Type: ${contentType}\r\n\r\n`));
+      parts.push(buffer);
+      parts.push(Buffer.from(`\r\n--${boundary}--\r\n`));
+      
+      const body = Buffer.concat(parts);
+      
+      const uploadResponse = await fetch(
+        `${this.baseUrl}/api/v1/accounts/${this.accountId}/contacts/${contactId}`,
+        {
+          method: "PUT",
+          headers: {
+            "Content-Type": `multipart/form-data; boundary=${boundary}`,
+            "api_access_token": this.apiToken,
+          },
+          body,
+        }
+      );
+      
+      if (uploadResponse.ok) {
+        console.log(`[Chatwoot] Updated avatar for contact ${contactId}`);
+      } else {
+        console.error(`[Chatwoot] Avatar upload failed: ${uploadResponse.status}`);
+      }
+    } catch (error) {
+      console.error(`[Chatwoot] Failed to update avatar:`, error);
+    }
   }
 
   private async findOrCreateConversation(

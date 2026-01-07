@@ -336,6 +336,34 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     }
   });
 
+  // ========== USER PROFILE ROUTE ==========
+
+  app.get("/api/whatsapp/accounts/:id/profile/:phoneNumber", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const accountId = parseInt(req.params.id);
+      const phoneNumber = req.params.phoneNumber;
+      
+      const account = await storage.getWhatsappAccount(accountId);
+      if (!account) {
+        return res.status(404).json({ error: "Account not found" });
+      }
+      
+      if (account.userId !== req.user!.id) {
+        return res.status(403).json({ error: "Access denied" });
+      }
+
+      if (!connectionManager.isConnected(accountId)) {
+        return res.status(400).json({ error: "WhatsApp not connected" });
+      }
+
+      const profile = await connectionManager.getUserProfile(accountId, phoneNumber);
+      res.json(profile);
+    } catch (error) {
+      console.error("[API] Error getting user profile:", error);
+      res.status(500).json({ error: "Failed to get user profile" });
+    }
+  });
+
   // ========== WEBHOOK ROUTE ==========
 
   app.post("/api/webhook/chatwoot/:accountId", async (req: Request, res: Response) => {

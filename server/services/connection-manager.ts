@@ -332,6 +332,55 @@ export class ConnectionManager extends EventEmitter {
     return !!connData?.socket;
   }
 
+  async getUserProfile(accountId: number, phoneNumber: string): Promise<{
+    profilePicture?: string;
+    status?: string;
+    exists: boolean;
+  }> {
+    const connData = this.connections.get(accountId);
+    if (!connData?.socket) {
+      throw new Error(`Account ${accountId} not connected`);
+    }
+
+    const jid = phoneNumber.includes("@") ? phoneNumber : `${phoneNumber}@s.whatsapp.net`;
+    const result: { profilePicture?: string; status?: string; exists: boolean } = { exists: false };
+
+    try {
+      // Check if user exists on WhatsApp
+      const existsResult = await connData.socket.onWhatsApp(jid);
+      if (!existsResult || !existsResult.length || !existsResult[0]?.exists) {
+        return result;
+      }
+      result.exists = true;
+
+      // Get profile picture
+      try {
+        const ppUrl = await connData.socket.profilePictureUrl(jid, "image");
+        result.profilePicture = ppUrl;
+      } catch (e) {
+        // User may not have a profile picture
+      }
+
+      // Get status/about - fetchStatus returns array format in newer Baileys
+      try {
+        const statusResult = await connData.socket.fetchStatus(jid) as any;
+        if (statusResult && Array.isArray(statusResult) && statusResult[0]?.status) {
+          result.status = statusResult[0].status;
+        } else if (statusResult?.status) {
+          result.status = statusResult.status;
+        }
+      } catch (e) {
+        // Status may not be available
+      }
+
+      console.log(`[ConnectionManager] Got profile for ${jid}: pic=${!!result.profilePicture}, status=${!!result.status}`);
+      return result;
+    } catch (error) {
+      console.error(`[ConnectionManager] Failed to get profile for ${jid}:`, error);
+      return result;
+    }
+  }
+
   async updateChatwootConfig(accountId: number, config: ChatwootConfig): Promise<void> {
     const connData = this.connections.get(accountId);
     if (connData) {
