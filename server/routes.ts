@@ -17,6 +17,18 @@ function requireAuth(req: Request, res: Response, next: NextFunction) {
   res.status(401).json({ error: "Not authenticated" });
 }
 
+// Admin middleware
+async function requireAdmin(req: Request, res: Response, next: NextFunction) {
+  if (!req.isAuthenticated()) {
+    return res.status(401).json({ error: "Not authenticated" });
+  }
+  const user = await storage.getUser(req.user!.id);
+  if (!user?.isAdmin) {
+    return res.status(403).json({ error: "Admin access required" });
+  }
+  return next();
+}
+
 export async function registerRoutes(httpServer: Server, app: Express) {
   // Setup authentication
   setupAuth(app);
@@ -101,11 +113,129 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     });
   });
 
-  app.get("/api/auth/me", (req: Request, res: Response) => {
+  app.get("/api/auth/me", async (req: Request, res: Response) => {
     if (req.isAuthenticated()) {
-      res.json(req.user);
+      const user = await storage.getUser(req.user!.id);
+      if (user) {
+        res.json({ 
+          id: user.id, 
+          username: user.username, 
+          email: user.email,
+          isAdmin: user.isAdmin 
+        });
+      } else {
+        res.status(401).json({ error: "User not found" });
+      }
     } else {
       res.status(401).json({ error: "Not authenticated" });
+    }
+  });
+
+  // ========== ADMIN ROUTES ==========
+
+  app.get("/api/admin/users", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const users = await storage.getAllUsers();
+      res.json(users.map(u => ({
+        id: u.id,
+        username: u.username,
+        email: u.email,
+        isAdmin: u.isAdmin,
+        createdAt: u.createdAt,
+      })));
+    } catch (error) {
+      console.error("[Admin] Error getting users:", error);
+      res.status(500).json({ error: "Failed to get users" });
+    }
+  });
+
+  app.get("/api/admin/accounts", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const accounts = await storage.getAllWhatsappAccounts();
+      const users = await storage.getAllUsers();
+      const userMap = new Map(users.map(u => [u.id, u.username]));
+      
+      const enrichedAccounts = accounts.map(acc => ({
+        ...acc,
+        ownerUsername: userMap.get(acc.userId) || "Unknown",
+        isConnected: connectionManager.isConnected(acc.id),
+      }));
+      
+      res.json(enrichedAccounts);
+    } catch (error) {
+      console.error("[Admin] Error getting all accounts:", error);
+      res.status(500).json({ error: "Failed to get accounts" });
+    }
+  });
+
+  app.patch("/api/admin/users/:id", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const userId = parseInt(req.params.id);
+      const { isAdmin } = req.body;
+      
+      if (typeof isAdmin !== "boolean") {
+        return res.status(400).json({ error: "isAdmin must be a boolean" });
+      }
+
+      // Prevent removing own admin status
+      if (userId === req.user!.id && !isAdmin) {
+        return res.status(400).json({ error: "Cannot remove your own admin status" });
+      }
+
+      const updated = await storage.updateUser(userId, { isAdmin });
+      if (!updated) {
+        return res.status(404).json({ error: "User not found" });
+      }
+
+      res.json({ 
+        id: updated.id, 
+        username: updated.username, 
+        email: updated.email, 
+        isAdmin: updated.isAdmin 
+      });
+    } catch (error) {
+      console.error("[Admin] Error updating user:", error);
+      res.status(500).json({ error: "Failed to update user" });
+    }
+  });
+
+  app.delete("/api/admin/users/:id", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const userId = parseInt(req.params.id);
+      
+      // Prevent deleting self
+      if (userId === req.user!.id) {
+        return res.status(400).json({ error: "Cannot delete your own account" });
+      }
+
+      const deleted = await storage.deleteUser(userId);
+      if (!deleted) {
+        return res.status(404).json({ error: "User not found" });
+      }
+
+      res.json({ success: true });
+    } catch (error) {
+      console.error("[Admin] Error deleting user:", error);
+      res.status(500).json({ error: "Failed to delete user" });
+    }
+  });
+
+  app.get("/api/admin/stats", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const users = await storage.getAllUsers();
+      const accounts = await storage.getAllWhatsappAccounts();
+      
+      const connectedCount = accounts.filter(acc => connectionManager.isConnected(acc.id)).length;
+      
+      res.json({
+        totalUsers: users.length,
+        totalAccounts: accounts.length,
+        connectedAccounts: connectedCount,
+        disconnectedAccounts: accounts.length - connectedCount,
+      });
+    } catch (error) {
+      console.error("[Admin] Error getting stats:", error);
+      res.status(500).json({ error: "Failed to get stats" });
     }
   });
 

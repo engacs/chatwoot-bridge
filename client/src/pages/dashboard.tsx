@@ -1,5 +1,5 @@
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { useParams, useLocation } from "wouter";
+import { useParams, useLocation, Link } from "wouter";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -11,7 +11,7 @@ import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { 
   Wifi, WifiOff, RefreshCw, Copy, Power, MessageSquare, ArrowDownLeft, ArrowUpRight, 
-  Clock, CheckCircle, XCircle, AlertCircle, Loader2, Plus, Settings, LogOut, Smartphone
+  Clock, CheckCircle, XCircle, AlertCircle, Loader2, Plus, Settings, LogOut, Smartphone, Shield
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import {
@@ -27,6 +27,7 @@ interface User {
   id: number;
   username: string;
   email: string;
+  isAdmin?: boolean;
 }
 
 interface WhatsAppAccount {
@@ -699,14 +700,27 @@ export default function Dashboard() {
               <p className="font-medium">{user?.username}</p>
               <p className="text-xs text-muted-foreground">{user?.email}</p>
             </div>
-            <Button 
-              variant="ghost" 
-              size="icon" 
-              onClick={() => logoutMutation.mutate()}
-              data-testid="button-logout"
-            >
-              <LogOut className="h-4 w-4" />
-            </Button>
+            <div className="flex items-center gap-1">
+              {user?.isAdmin && (
+                <Link href="/admin">
+                  <Button 
+                    variant="ghost" 
+                    size="icon"
+                    data-testid="button-admin"
+                  >
+                    <Shield className="h-4 w-4" />
+                  </Button>
+                </Link>
+              )}
+              <Button 
+                variant="ghost" 
+                size="icon" 
+                onClick={() => logoutMutation.mutate()}
+                data-testid="button-logout"
+              >
+                <LogOut className="h-4 w-4" />
+              </Button>
+            </div>
           </div>
         </div>
       </aside>
