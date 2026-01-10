@@ -20,6 +20,13 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 
+interface CurrentUser {
+  id: number;
+  username: string;
+  email: string;
+  isAdmin: boolean;
+}
+
 interface AdminStats {
   totalUsers: number;
   totalAccounts: number;
@@ -48,6 +55,10 @@ interface AdminAccount {
 
 export default function AdminPage() {
   const { toast } = useToast();
+
+  const { data: currentUser } = useQuery<CurrentUser>({
+    queryKey: ["/api/auth/me"],
+  });
 
   const { data: stats, isLoading: statsLoading } = useQuery<AdminStats>({
     queryKey: ["/api/admin/stats"],
@@ -204,45 +215,51 @@ export default function AdminPage() {
                           )}
                         </div>
                         <div className="flex items-center gap-4">
-                          <div className="flex items-center gap-2">
-                            <span className="text-sm text-muted-foreground">Admin</span>
-                            <Switch
-                              checked={user.isAdmin}
-                              onCheckedChange={(checked) =>
-                                toggleAdminMutation.mutate({ userId: user.id, isAdmin: checked })
-                              }
-                              disabled={toggleAdminMutation.isPending}
-                              data-testid={`switch-admin-${user.id}`}
-                            />
-                          </div>
-                          <AlertDialog>
-                            <AlertDialogTrigger asChild>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                data-testid={`button-delete-user-${user.id}`}
-                              >
-                                <Trash2 className="h-4 w-4 text-destructive" />
-                              </Button>
-                            </AlertDialogTrigger>
-                            <AlertDialogContent>
-                              <AlertDialogHeader>
-                                <AlertDialogTitle>Delete User</AlertDialogTitle>
-                                <AlertDialogDescription>
-                                  Are you sure you want to delete user "{user.username}"? This will also delete all their WhatsApp accounts and data. This action cannot be undone.
-                                </AlertDialogDescription>
-                              </AlertDialogHeader>
-                              <AlertDialogFooter>
-                                <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                <AlertDialogAction
-                                  onClick={() => deleteUserMutation.mutate(user.id)}
-                                  className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                                >
-                                  Delete
-                                </AlertDialogAction>
-                              </AlertDialogFooter>
-                            </AlertDialogContent>
-                          </AlertDialog>
+                          {user.id === currentUser?.id ? (
+                            <Badge variant="outline">You</Badge>
+                          ) : (
+                            <>
+                              <div className="flex items-center gap-2">
+                                <span className="text-sm text-muted-foreground">Admin</span>
+                                <Switch
+                                  checked={user.isAdmin}
+                                  onCheckedChange={(checked) =>
+                                    toggleAdminMutation.mutate({ userId: user.id, isAdmin: checked })
+                                  }
+                                  disabled={toggleAdminMutation.isPending}
+                                  data-testid={`switch-admin-${user.id}`}
+                                />
+                              </div>
+                              <AlertDialog>
+                                <AlertDialogTrigger asChild>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    data-testid={`button-delete-user-${user.id}`}
+                                  >
+                                    <Trash2 className="h-4 w-4 text-destructive" />
+                                  </Button>
+                                </AlertDialogTrigger>
+                                <AlertDialogContent>
+                                  <AlertDialogHeader>
+                                    <AlertDialogTitle>Delete User</AlertDialogTitle>
+                                    <AlertDialogDescription>
+                                      Are you sure you want to delete user "{user.username}"? This will also delete all their WhatsApp accounts and data. This action cannot be undone.
+                                    </AlertDialogDescription>
+                                  </AlertDialogHeader>
+                                  <AlertDialogFooter>
+                                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                    <AlertDialogAction
+                                      onClick={() => deleteUserMutation.mutate(user.id)}
+                                      className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                                    >
+                                      Delete
+                                    </AlertDialogAction>
+                                  </AlertDialogFooter>
+                                </AlertDialogContent>
+                              </AlertDialog>
+                            </>
+                          )}
                         </div>
                       </div>
                     ))}
