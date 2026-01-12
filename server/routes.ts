@@ -575,22 +575,36 @@ export async function registerRoutes(httpServer: Server, app: Express) {
       const logs = await storage.getMessageLogs(accountId, 10000);
       const filename = `messages_${account.label.replace(/\s+/g, '_')}_${new Date().toISOString().split('T')[0]}`;
 
+      const escapeCSV = (value: string | null | undefined): string => {
+        if (value === null || value === undefined) return '""';
+        const str = String(value);
+        const escaped = str.replace(/"/g, '""');
+        return `"${escaped}"`;
+      };
+
       if (format === "csv") {
         const csvHeader = "ID,Direction,Phone,Name,Content,Status,Date\n";
         const csvRows = logs.map(log => {
           const phone = log.remoteJid?.replace("@s.whatsapp.net", "") || "";
-          const content = (log.content || "").replace(/"/g, '""').replace(/\n/g, " ");
           const date = new Date(log.createdAt).toISOString();
-          return `${log.id},"${log.direction}","${phone}","${log.remoteName || ""}","${content}","${log.status}","${date}"`;
+          return [
+            log.id,
+            escapeCSV(log.direction),
+            escapeCSV(phone),
+            escapeCSV(log.remoteName),
+            escapeCSV(log.content),
+            escapeCSV(log.status),
+            escapeCSV(date)
+          ].join(",");
         }).join("\n");
         
         res.setHeader("Content-Type", "text/csv");
         res.setHeader("Content-Disposition", `attachment; filename="${filename}.csv"`);
         res.send(csvHeader + csvRows);
       } else {
-        res.setHeader("Content-Type", "application/json");
+        res.type("application/json");
         res.setHeader("Content-Disposition", `attachment; filename="${filename}.json"`);
-        res.json(logs);
+        res.send(JSON.stringify(logs, null, 2));
       }
     } catch (error) {
       console.error("[API] Error exporting logs:", error);
