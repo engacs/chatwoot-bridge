@@ -11,7 +11,7 @@ import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { 
   Wifi, WifiOff, RefreshCw, Copy, Power, MessageSquare, ArrowDownLeft, ArrowUpRight, 
-  Clock, CheckCircle, XCircle, AlertCircle, Loader2, Plus, Settings, LogOut, Smartphone, Shield
+  Clock, CheckCircle, XCircle, AlertCircle, Loader2, Plus, Settings, LogOut, Smartphone, Shield, Download
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import {
@@ -555,6 +555,10 @@ function MessageLogsCard({ accountId }: { accountId: number }) {
     refetchInterval: 10000,
   });
 
+  const handleExport = (format: "csv" | "json") => {
+    window.open(`/api/whatsapp/accounts/${accountId}/logs/export?format=${format}`, "_blank");
+  };
+
   return (
     <Card>
       <CardHeader className="flex flex-row items-center justify-between gap-2 pb-2">
@@ -565,9 +569,26 @@ function MessageLogsCard({ accountId }: { accountId: number }) {
           </CardTitle>
           <CardDescription>Latest synced messages</CardDescription>
         </div>
-        <Badge variant="secondary" className="text-xs">
-          {logs.length} messages
-        </Badge>
+        <div className="flex items-center gap-2">
+          <Button 
+            variant="outline" 
+            size="sm" 
+            onClick={() => handleExport("csv")}
+            data-testid="button-export-csv"
+          >
+            <Download className="h-4 w-4 mr-1" />
+            CSV
+          </Button>
+          <Button 
+            variant="outline" 
+            size="sm" 
+            onClick={() => handleExport("json")}
+            data-testid="button-export-json"
+          >
+            <Download className="h-4 w-4 mr-1" />
+            JSON
+          </Button>
+        </div>
       </CardHeader>
       <CardContent>
         <ScrollArea className="h-[300px] pr-4">

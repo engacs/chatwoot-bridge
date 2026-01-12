@@ -557,6 +557,47 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     }
   });
 
+  // Export message logs
+  app.get("/api/whatsapp/accounts/:id/logs/export", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const accountId = parseInt(req.params.id);
+      const format = req.query.format as string || "json";
+      const account = await storage.getWhatsappAccount(accountId);
+      
+      if (!account) {
+        return res.status(404).json({ error: "Account not found" });
+      }
+      
+      if (account.userId !== req.user!.id) {
+        return res.status(403).json({ error: "Access denied" });
+      }
+
+      const logs = await storage.getMessageLogs(accountId, 10000);
+      const filename = `messages_${account.label.replace(/\s+/g, '_')}_${new Date().toISOString().split('T')[0]}`;
+
+      if (format === "csv") {
+        const csvHeader = "ID,Direction,Phone,Name,Content,Status,Date\n";
+        const csvRows = logs.map(log => {
+          const phone = log.remoteJid?.replace("@s.whatsapp.net", "") || "";
+          const content = (log.content || "").replace(/"/g, '""').replace(/\n/g, " ");
+          const date = new Date(log.createdAt).toISOString();
+          return `${log.id},"${log.direction}","${phone}","${log.remoteName || ""}","${content}","${log.status}","${date}"`;
+        }).join("\n");
+        
+        res.setHeader("Content-Type", "text/csv");
+        res.setHeader("Content-Disposition", `attachment; filename="${filename}.csv"`);
+        res.send(csvHeader + csvRows);
+      } else {
+        res.setHeader("Content-Type", "application/json");
+        res.setHeader("Content-Disposition", `attachment; filename="${filename}.json"`);
+        res.json(logs);
+      }
+    } catch (error) {
+      console.error("[API] Error exporting logs:", error);
+      res.status(500).json({ error: "Failed to export logs" });
+    }
+  });
+
   // ========== USER PROFILE ROUTE ==========
 
   app.get("/api/whatsapp/accounts/:id/profile/:phoneNumber", requireAuth, async (req: Request, res: Response) => {
