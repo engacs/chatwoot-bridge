@@ -4,7 +4,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
-import { ArrowLeft, Webhook, Clock, Code, ChevronRight, Trash2, ArrowDownLeft, ArrowUpRight, RefreshCw } from "lucide-react";
+import { ArrowLeft, Webhook, Clock, Code, ChevronRight, Trash2, ArrowDownLeft, ArrowUpRight, RefreshCw, MessageSquare } from "lucide-react";
+import { SiWhatsapp } from "react-icons/si";
 import { useState } from "react";
 import {
   Dialog,
@@ -105,10 +106,11 @@ export default function WebhooksPage() {
           <Card>
             <CardHeader className="pb-2">
               <div className="flex items-center gap-2">
+                <SiWhatsapp className="h-4 w-4 text-green-500" />
                 <ArrowDownLeft className="h-4 w-4 text-green-500" />
                 <CardTitle className="text-base">Incoming</CardTitle>
               </div>
-              <CardDescription>Requests from Chatwoot</CardDescription>
+              <CardDescription>Webhooks from Chatwoot (WhatsApp events)</CardDescription>
             </CardHeader>
             <CardContent>
               <Badge variant="outline">{incomingLogs.length} logs</Badge>
@@ -117,10 +119,11 @@ export default function WebhooksPage() {
           <Card>
             <CardHeader className="pb-2">
               <div className="flex items-center gap-2">
+                <MessageSquare className="h-4 w-4 text-blue-500" />
                 <ArrowUpRight className="h-4 w-4 text-blue-500" />
                 <CardTitle className="text-base">Outgoing</CardTitle>
               </div>
-              <CardDescription>Requests to Chatwoot</CardDescription>
+              <CardDescription>API calls to Chatwoot</CardDescription>
             </CardHeader>
             <CardContent>
               <Badge variant="outline">{outgoingLogs.length} logs</Badge>
@@ -154,11 +157,19 @@ export default function WebhooksPage() {
                       data-testid={`webhook-log-${log.id}`}
                     >
                       <div className="flex items-center gap-4">
-                        {log.direction === "incoming" ? (
-                          <ArrowDownLeft className="h-4 w-4 text-green-500" />
-                        ) : (
-                          <ArrowUpRight className="h-4 w-4 text-blue-500" />
-                        )}
+                        <div className="flex items-center gap-1">
+                          {log.direction === "incoming" ? (
+                            <>
+                              <SiWhatsapp className="h-4 w-4 text-green-500" />
+                              <ArrowDownLeft className="h-3 w-3 text-green-500" />
+                            </>
+                          ) : (
+                            <>
+                              <MessageSquare className="h-4 w-4 text-blue-500" />
+                              <ArrowUpRight className="h-3 w-3 text-blue-500" />
+                            </>
+                          )}
+                        </div>
                         <Badge variant="outline" className="font-mono">
                           {log.method}
                         </Badge>
