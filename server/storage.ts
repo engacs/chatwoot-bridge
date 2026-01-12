@@ -7,7 +7,7 @@ import {
   appSettings, type AppSetting
 } from "@shared/schema";
 import { db } from "./db";
-import { eq, desc, and } from "drizzle-orm";
+import { eq, desc, and, lt } from "drizzle-orm";
 
 export interface IStorage {
   // Users
@@ -40,10 +40,12 @@ export interface IStorage {
   getMessageLogs(whatsappAccountId: number, limit?: number): Promise<MessageLog[]>;
   addMessageLog(log: Omit<MessageLog, "id" | "createdAt">): Promise<MessageLog>;
   getMessageByWhatsAppId(whatsappAccountId: number, whatsappId: string): Promise<MessageLog | undefined>;
+  deleteOldMessageLogs(olderThanDays: number): Promise<number>;
   
   // Webhook Events
   getWebhookEvents(whatsappAccountId: number, limit?: number): Promise<WebhookEvent[]>;
   addWebhookEvent(event: Omit<WebhookEvent, "id" | "processedAt">): Promise<WebhookEvent>;
+  deleteOldWebhookEvents(olderThanDays: number): Promise<number>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -185,6 +187,13 @@ export class DatabaseStorage implements IStorage {
     return log || undefined;
   }
 
+  async deleteOldMessageLogs(olderThanDays: number): Promise<number> {
+    const cutoffDate = new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - olderThanDays);
+    const result = await db.delete(messageLogs).where(lt(messageLogs.createdAt, cutoffDate)).returning();
+    return result.length;
+  }
+
   // Webhook Events
   async getWebhookEvents(whatsappAccountId: number, limit: number = 50): Promise<WebhookEvent[]> {
     return db
@@ -199,6 +208,34 @@ export class DatabaseStorage implements IStorage {
     const [created] = await db.insert(webhookEvents).values(event).returning();
     return created;
   }
+
+  async deleteOldWebhookEvents(olderThanDays: number): Promise<number> {
+    const cutoffDate = new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - olderThanDays);
+    const result = await db.delete(webhookEvents).where(lt(webhookEvents.processedAt, cutoffDate)).returning();
+    return result.length;
+  }
 }
 
 export const storage = new DatabaseStorage();
+
+// Cleanup job - runs every hour to delete old message logs and webhook events
+export function startCleanupJob() {
+  const runCleanup = async () => {
+    try {
+      const deletedMessages = await storage.deleteOldMessageLogs(1); // 1 day
+      const deletedWebhooks = await storage.deleteOldWebhookEvents(1); // 1 day
+      if (deletedMessages > 0 || deletedWebhooks > 0) {
+        console.log(`[Cleanup] Deleted ${deletedMessages} old messages and ${deletedWebhooks} old webhook events`);
+      }
+    } catch (error) {
+      console.error("[Cleanup] Error during cleanup:", error);
+    }
+  };
+
+  // Run immediately on startup
+  runCleanup();
+  
+  // Then run every hour
+  setInterval(runCleanup, 60 * 60 * 1000);
+}
