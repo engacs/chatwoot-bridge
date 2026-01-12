@@ -413,6 +413,32 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     }
   });
 
+  app.patch("/api/whatsapp/accounts/:id", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const accountId = parseInt(req.params.id);
+      const { label } = req.body;
+      const account = await storage.getWhatsappAccount(accountId);
+      
+      if (!account) {
+        return res.status(404).json({ error: "Account not found" });
+      }
+      
+      if (account.userId !== req.user!.id) {
+        return res.status(403).json({ error: "Access denied" });
+      }
+
+      if (!label || typeof label !== "string" || label.trim().length === 0) {
+        return res.status(400).json({ error: "Label is required" });
+      }
+
+      const updated = await storage.updateWhatsappAccount(accountId, { label: label.trim() });
+      res.json(updated);
+    } catch (error) {
+      console.error("[API] Error updating account:", error);
+      res.status(500).json({ error: "Failed to update account" });
+    }
+  });
+
   app.delete("/api/whatsapp/accounts/:id", requireAuth, async (req: Request, res: Response) => {
     try {
       const accountId = parseInt(req.params.id);

@@ -11,7 +11,7 @@ import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { 
   Wifi, WifiOff, RefreshCw, Copy, Power, MessageSquare, ArrowDownLeft, ArrowUpRight, 
-  Clock, CheckCircle, XCircle, AlertCircle, Loader2, Plus, Settings, LogOut, Smartphone, Shield, Download, Trash2
+  Clock, CheckCircle, XCircle, AlertCircle, Loader2, Plus, Settings, LogOut, Smartphone, Shield, Download, Trash2, Pencil, Check, X
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import {
@@ -617,6 +617,12 @@ function MessageLogsCard({ accountId }: { accountId: number }) {
 function AccountDetails({ account, onRefresh }: { account: WhatsAppAccount; onRefresh: () => void }) {
   const { toast } = useToast();
   const [, setLocation] = useLocation();
+  const [isEditingLabel, setIsEditingLabel] = useState(false);
+  const [editLabel, setEditLabel] = useState(account.label);
+
+  useEffect(() => {
+    setEditLabel(account.label);
+  }, [account.label]);
 
   const deleteMutation = useMutation({
     mutationFn: async () => {
@@ -632,11 +638,66 @@ function AccountDetails({ account, onRefresh }: { account: WhatsAppAccount; onRe
     },
   });
 
+  const updateLabelMutation = useMutation({
+    mutationFn: async () => {
+      await apiRequest("PATCH", `/api/whatsapp/accounts/${account.id}`, { label: editLabel });
+    },
+    onSuccess: () => {
+      toast({ title: "Label updated" });
+      queryClient.invalidateQueries({ queryKey: ["/api/whatsapp/accounts"] });
+      setIsEditingLabel(false);
+    },
+    onError: (error: Error) => {
+      toast({ title: "Update failed", description: error.message, variant: "destructive" });
+    },
+  });
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-2xl font-bold">{account.label}</h2>
+          {isEditingLabel ? (
+            <div className="flex items-center gap-2">
+              <Input
+                value={editLabel}
+                onChange={(e) => setEditLabel(e.target.value)}
+                className="text-xl font-bold h-9"
+                data-testid="input-edit-label"
+              />
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => updateLabelMutation.mutate()}
+                disabled={updateLabelMutation.isPending}
+                data-testid="button-save-label"
+              >
+                <Check className="h-4 w-4 text-green-500" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => {
+                  setEditLabel(account.label);
+                  setIsEditingLabel(false);
+                }}
+                data-testid="button-cancel-edit"
+              >
+                <X className="h-4 w-4 text-red-500" />
+              </Button>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2">
+              <h2 className="text-2xl font-bold">{account.label}</h2>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setIsEditingLabel(true)}
+                data-testid="button-edit-label"
+              >
+                <Pencil className="h-4 w-4 text-muted-foreground" />
+              </Button>
+            </div>
+          )}
           <p className="text-muted-foreground">
             {account.phoneNumber ? `+${account.phoneNumber}` : "Not connected yet"}
           </p>
