@@ -90,6 +90,9 @@ function Router() {
       <Route path="/admin">
         {() => <AdminRoute component={AdminPage} />}
       </Route>
+      <Route path="/dashboard">
+        {() => <ProtectedRoute component={Dashboard} />}
+      </Route>
       <Route path="/">
         {() => <ProtectedRoute component={Dashboard} />}
       </Route>

@@ -11,7 +11,7 @@ import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { 
   Wifi, WifiOff, RefreshCw, Copy, Power, MessageSquare, ArrowDownLeft, ArrowUpRight, 
-  Clock, CheckCircle, XCircle, AlertCircle, Loader2, Plus, Settings, LogOut, Smartphone, Shield, Download
+  Clock, CheckCircle, XCircle, AlertCircle, Loader2, Plus, Settings, LogOut, Smartphone, Shield, Download, Trash2
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import {
@@ -615,6 +615,23 @@ function MessageLogsCard({ accountId }: { accountId: number }) {
 }
 
 function AccountDetails({ account, onRefresh }: { account: WhatsAppAccount; onRefresh: () => void }) {
+  const { toast } = useToast();
+  const [, setLocation] = useLocation();
+
+  const deleteMutation = useMutation({
+    mutationFn: async () => {
+      await apiRequest("DELETE", `/api/whatsapp/accounts/${account.id}`);
+    },
+    onSuccess: () => {
+      toast({ title: "Account deleted" });
+      queryClient.invalidateQueries({ queryKey: ["/api/whatsapp/accounts"] });
+      setLocation("/");
+    },
+    onError: (error: Error) => {
+      toast({ title: "Delete failed", description: error.message, variant: "destructive" });
+    },
+  });
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -624,7 +641,22 @@ function AccountDetails({ account, onRefresh }: { account: WhatsAppAccount; onRe
             {account.phoneNumber ? `+${account.phoneNumber}` : "Not connected yet"}
           </p>
         </div>
-        <ConnectionStatusBadge status={account.status} />
+        <div className="flex items-center gap-2">
+          <ConnectionStatusBadge status={account.status} />
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => {
+              if (confirm(`Are you sure you want to delete "${account.label}"? This action cannot be undone.`)) {
+                deleteMutation.mutate();
+              }
+            }}
+            disabled={deleteMutation.isPending}
+            data-testid="button-delete-account"
+          >
+            <Trash2 className="h-4 w-4 text-red-500" />
+          </Button>
+        </div>
       </div>
 
       {account.status !== "connected" && (

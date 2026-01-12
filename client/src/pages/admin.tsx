@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
-import { Users, Smartphone, Wifi, WifiOff, Shield, UserPlus, Key, ArrowLeft, Settings, UserX, UserCheck } from "lucide-react";
+import { Users, Smartphone, Wifi, WifiOff, Shield, UserPlus, Key, ArrowLeft, Settings, UserX, UserCheck, Trash2 } from "lucide-react";
 import { Link } from "wouter";
 import {
   Dialog,
@@ -160,6 +160,21 @@ export default function AdminPage() {
     },
     onError: (error: Error) => {
       toast({ title: "Failed to update settings", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const deleteUserMutation = useMutation({
+    mutationFn: async (userId: number) => {
+      return apiRequest("DELETE", `/api/admin/users/${userId}`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/users"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/stats"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/accounts"] });
+      toast({ title: "User deleted successfully" });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Failed to delete user", description: error.message, variant: "destructive" });
     },
   });
 
@@ -429,6 +444,19 @@ export default function AdminPage() {
                                   </DialogFooter>
                                 </DialogContent>
                               </Dialog>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => {
+                                  if (confirm(`Are you sure you want to delete user "${user.username}"? This will also delete all their WhatsApp accounts.`)) {
+                                    deleteUserMutation.mutate(user.id);
+                                  }
+                                }}
+                                disabled={deleteUserMutation.isPending}
+                                data-testid={`button-delete-user-${user.id}`}
+                              >
+                                <Trash2 className="h-4 w-4 text-red-500" />
+                              </Button>
                             </>
                           )}
                         </div>

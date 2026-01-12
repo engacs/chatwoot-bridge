@@ -282,6 +282,33 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     }
   });
 
+  // Delete user (admin only)
+  app.delete("/api/admin/users/:id", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const userId = parseInt(req.params.id);
+      
+      if (userId === req.user!.id) {
+        return res.status(400).json({ error: "Cannot delete your own account" });
+      }
+
+      // Delete all user's WhatsApp accounts first
+      const accounts = await storage.getWhatsappAccountsByUser(userId);
+      for (const account of accounts) {
+        await connectionManager.disconnectAccount(account.id);
+        await storage.deleteWhatsappAccount(account.id);
+      }
+
+      const deleted = await storage.deleteUser(userId);
+      if (!deleted) {
+        return res.status(404).json({ error: "User not found" });
+      }
+
+      res.json({ success: true });
+    } catch (error) {
+      console.error("[Admin] Error deleting user:", error);
+      res.status(500).json({ error: "Failed to delete user" });
+    }
+  });
 
   app.get("/api/admin/stats", requireAdmin, async (req: Request, res: Response) => {
     try {
