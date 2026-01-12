@@ -4,6 +4,7 @@ import {
   chatwootConfigs, type ChatwootConfig, type InsertChatwootConfig,
   messageLogs, type MessageLog,
   webhookEvents, type WebhookEvent,
+  webhookLogs, type WebhookLog,
   appSettings, type AppSetting
 } from "@shared/schema";
 import { db } from "./db";
@@ -51,6 +52,7 @@ export interface IStorage {
   getWebhookLogs(whatsappAccountId: number, limit?: number): Promise<WebhookLog[]>;
   addWebhookLog(log: Omit<WebhookLog, "id" | "createdAt">): Promise<WebhookLog>;
   deleteOldWebhookLogs(olderThanDays: number): Promise<number>;
+  clearWebhookLogs(whatsappAccountId: number): Promise<number>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -240,6 +242,11 @@ export class DatabaseStorage implements IStorage {
     const cutoffDate = new Date();
     cutoffDate.setDate(cutoffDate.getDate() - olderThanDays);
     const result = await db.delete(webhookLogs).where(lt(webhookLogs.createdAt, cutoffDate)).returning();
+    return result.length;
+  }
+
+  async clearWebhookLogs(whatsappAccountId: number): Promise<number> {
+    const result = await db.delete(webhookLogs).where(eq(webhookLogs.whatsappAccountId, whatsappAccountId)).returning();
     return result.length;
   }
 }

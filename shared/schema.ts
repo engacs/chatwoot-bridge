@@ -110,10 +110,12 @@ export type WebhookEvent = typeof webhookEvents.$inferSelect;
 export const webhookLogs = pgTable("webhook_logs", {
   id: serial("id").primaryKey(),
   whatsappAccountId: integer("whatsapp_account_id").references(() => whatsappAccounts.id, { onDelete: "set null" }),
+  direction: text("direction").notNull().default("incoming"), // "incoming" or "outgoing"
   method: text("method").notNull(),
   url: text("url").notNull(),
   headers: jsonb("headers").notNull(),
   body: jsonb("body").notNull(),
+  statusCode: integer("status_code"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 

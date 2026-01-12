@@ -44,11 +44,25 @@ export class ChatwootService {
       "api_access_token": this.apiToken,
     };
 
+    let statusCode: number | undefined;
     try {
       const response = await fetch(url, {
         method,
         headers,
         body: body ? JSON.stringify(body) : undefined,
+      });
+
+      statusCode = response.status;
+
+      // Log outgoing request
+      await storage.addWebhookLog({
+        whatsappAccountId: this.whatsappAccountId,
+        direction: "outgoing",
+        method,
+        url,
+        headers: { "Content-Type": "application/json" },
+        body: body || {},
+        statusCode,
       });
 
       if (!response.ok) {
@@ -61,6 +75,18 @@ export class ChatwootService {
       return data as T;
     } catch (error) {
       console.error(`[Chatwoot] Request failed:`, error);
+      
+      // Log failed outgoing request
+      await storage.addWebhookLog({
+        whatsappAccountId: this.whatsappAccountId,
+        direction: "outgoing",
+        method,
+        url,
+        headers: { "Content-Type": "application/json" },
+        body: body || {},
+        statusCode: statusCode || 0,
+      });
+      
       return null;
     }
   }
