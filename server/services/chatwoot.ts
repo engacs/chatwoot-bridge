@@ -120,6 +120,11 @@ export class ChatwootService {
   private async findOrCreateContact(phoneNumber: string, name?: string, avatarUrl?: string): Promise<ChatwootContact | null> {
     const cleanPhone = phoneNumber.replace("@s.whatsapp.net", "").replace("@g.us", "");
     
+    // Validate if phoneNumber is likely an LID or non-standard format
+    // Chatwoot requires e164 (+123456789)
+    // If it's an LID or doesn't look like a phone number, we'll use it as identifier but might need a fallback for phone_number
+    const isStandardPhone = /^\d{7,15}$/.test(cleanPhone);
+
     const searchResult = await this.apiRequest<{ payload: ChatwootContact[] }>(
       "GET",
       `/api/v1/accounts/${this.accountId}/contacts/search?q=${cleanPhone}`
@@ -136,15 +141,21 @@ export class ChatwootService {
       return existingContact;
     }
 
+    const contactData: any = {
+      inbox_id: parseInt(this.inboxId, 10),
+      name: name || `WhatsApp ${cleanPhone}`,
+      identifier: cleanPhone,
+    };
+
+    // Only add phone_number if it looks like a real one to avoid Chatwoot 422 errors
+    if (isStandardPhone) {
+      contactData.phone_number = `+${cleanPhone}`;
+    }
+
     const createResult = await this.apiRequest<{ payload: { contact: ChatwootContact } }>(
       "POST",
       `/api/v1/accounts/${this.accountId}/contacts`,
-      {
-        inbox_id: parseInt(this.inboxId, 10),
-        name: name || `WhatsApp ${cleanPhone}`,
-        phone_number: `+${cleanPhone}`,
-        identifier: cleanPhone,
-      }
+      contactData
     );
 
     return createResult?.payload?.contact || null;
