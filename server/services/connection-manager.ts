@@ -152,6 +152,14 @@ export class ConnectionManager extends EventEmitter {
       }
     });
 
+    // Listen for LID to phone number mappings
+    socket.ev.on("lid-mapping.update" as any, (mapping: Array<{ lid: string; pn: string }>) => {
+      console.log(`[ConnectionManager] Account ${accountId} received LID mappings:`, mapping.length);
+      for (const { lid, pn } of mapping) {
+        console.log(`[ConnectionManager] LID mapping: ${lid} -> ${pn}`);
+      }
+    });
+
     socket.ev.on("messages.upsert", async ({ messages, type }) => {
       if (type !== "notify") return;
 
@@ -165,8 +173,26 @@ export class ConnectionManager extends EventEmitter {
         const content = this.extractMessageContent(msg);
         if (!content) continue;
 
-        const remoteJid = msg.key.remoteJid || "";
+        let remoteJid = msg.key.remoteJid || "";
         const pushName = msg.pushName || null;
+
+        // Try to resolve LID to phone number
+        if (remoteJid.endsWith("@lid")) {
+          try {
+            const lidMapping = (socket as any).signalRepository?.lidMapping;
+            if (lidMapping?.getPNForLID) {
+              const phoneNumber = lidMapping.getPNForLID(remoteJid);
+              if (phoneNumber) {
+                console.log(`[ConnectionManager] Resolved LID ${remoteJid} to ${phoneNumber}`);
+                remoteJid = phoneNumber;
+              } else {
+                console.log(`[ConnectionManager] Could not resolve LID ${remoteJid} - no mapping available yet`);
+              }
+            }
+          } catch (err) {
+            console.log(`[ConnectionManager] LID resolution not available: ${err}`);
+          }
+        }
 
         console.log(`[ConnectionManager] Account ${accountId} incoming: ${remoteJid} - ${content.substring(0, 50)}`);
 
