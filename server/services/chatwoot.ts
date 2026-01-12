@@ -144,7 +144,11 @@ export class ChatwootService {
   }
 
   private async findOrCreateContact(phoneNumber: string, name?: string, avatarUrl?: string): Promise<ChatwootContact | null> {
-    const cleanPhone = phoneNumber.replace("@s.whatsapp.net", "").replace("@g.us", "");
+    // Remove WhatsApp suffixes and device number (e.g., :0, :1, etc.)
+    let cleanPhone = phoneNumber
+      .replace("@s.whatsapp.net", "")
+      .replace("@g.us", "")
+      .replace(/:\d+$/, ""); // Remove device number like :0, :1
     
     // Validate if phoneNumber is likely an LID or non-standard format
     // Chatwoot requires e164 (+123456789)
@@ -248,7 +252,7 @@ export class ChatwootService {
     sourceId: string,
     contactId: number
   ): Promise<ChatwootConversation | null> {
-    const cleanPhone = sourceId.replace("@s.whatsapp.net", "").replace("@g.us", "");
+    const cleanPhone = sourceId.replace("@s.whatsapp.net", "").replace("@g.us", "").replace(/:\d+$/, "");
     
     // Check cache first
     if (this.conversationCache.has(sourceId)) {
@@ -354,7 +358,7 @@ export class ChatwootService {
       return;
     }
 
-    const cleanPhone = remoteJid.replace("@s.whatsapp.net", "").replace("@g.us", "");
+    const cleanPhone = remoteJid.replace("@s.whatsapp.net", "").replace("@g.us", "").replace(/:\d+$/, "");
     
     const contact = await this.findOrCreateContact(cleanPhone, pushName || undefined);
     if (!contact) {
