@@ -109,7 +109,8 @@ export class ConnectionManager extends EventEmitter {
         if (!connData) return;
 
         const shouldReconnect =
-          (lastDisconnect?.error as Boom)?.output?.statusCode !== DisconnectReason.loggedOut;
+          (lastDisconnect?.error as Boom)?.output?.statusCode !== DisconnectReason.loggedOut &&
+          connData.socket !== null;
 
         console.log(
           `[ConnectionManager] Account ${accountId} closed. Status: ${
@@ -230,8 +231,10 @@ export class ConnectionManager extends EventEmitter {
   async disconnectAccount(accountId: number): Promise<void> {
     const connData = this.connections.get(accountId);
     if (connData?.socket) {
-      connData.socket.end(undefined);
+      const socket = connData.socket;
+      // Clear from connections map first to prevent reconnect logic
       this.connections.delete(accountId);
+      socket.end(undefined);
     }
     await storage.updateWhatsappAccount(accountId, { 
       status: "disconnected", 
