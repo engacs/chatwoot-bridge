@@ -7,6 +7,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import Dashboard from "@/pages/dashboard";
 import AuthPage from "@/pages/auth";
 import AdminPage from "@/pages/admin";
+import WebhooksPage from "@/pages/webhooks";
 import NotFound from "@/pages/not-found";
 import { Loader2 } from "lucide-react";
 
@@ -89,6 +90,9 @@ function Router() {
       <Route path="/auth" component={AuthRoute} />
       <Route path="/admin">
         {() => <AdminRoute component={AdminPage} />}
+      </Route>
+      <Route path="/account/:id/webhooks">
+        {() => <ProtectedRoute component={WebhooksPage} />}
       </Route>
       <Route path="/dashboard">
         {() => <ProtectedRoute component={Dashboard} />}

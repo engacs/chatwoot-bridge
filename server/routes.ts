@@ -665,6 +665,27 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     }
   });
 
+  app.get("/api/whatsapp/accounts/:id/webhooks", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const accountId = parseInt(req.params.id);
+      const account = await storage.getWhatsappAccount(accountId);
+      
+      if (!account) {
+        return res.status(404).json({ error: "Account not found" });
+      }
+      
+      if (account.userId !== req.user!.id) {
+        return res.status(403).json({ error: "Access denied" });
+      }
+
+      const logs = await storage.getWebhookLogs(accountId, 100);
+      res.json(logs);
+    } catch (error) {
+      console.error("[API] Error getting webhook logs:", error);
+      res.status(500).json({ error: "Failed to get webhook logs" });
+    }
+  });
+
   // ========== USER PROFILE ROUTE ==========
 
   app.get("/api/whatsapp/accounts/:id/profile/:phoneNumber", requireAuth, async (req: Request, res: Response) => {
@@ -747,6 +768,15 @@ export async function registerRoutes(httpServer: Server, app: Express) {
         payload: req.body,
         success: true,
         error: null,
+      });
+
+      // Log to debug webhook logs
+      await storage.addWebhookLog({
+        whatsappAccountId: accountId,
+        method: req.method,
+        url: req.originalUrl,
+        headers: req.headers,
+        body: req.body,
       });
 
       // Process the webhook

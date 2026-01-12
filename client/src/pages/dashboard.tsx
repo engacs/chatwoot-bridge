@@ -11,7 +11,7 @@ import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { 
   Wifi, WifiOff, RefreshCw, Copy, Power, MessageSquare, ArrowDownLeft, ArrowUpRight, 
-  Clock, CheckCircle, XCircle, AlertCircle, Loader2, Plus, Settings, LogOut, Smartphone, Shield, Download, Trash2, Pencil, Check, X
+  Clock, CheckCircle, XCircle, AlertCircle, Loader2, Plus, Settings, LogOut, Smartphone, Shield, Download, Trash2, Pencil, Check, X, Webhook
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import {
@@ -808,7 +808,23 @@ export default function Dashboard() {
           <AddAccountDialog onSuccess={() => refetchAccounts()} />
         </div>
 
-        <div className="p-4 border-t">
+          <div className="space-y-1">
+            <h3 className="text-sm font-medium text-muted-foreground px-2">System</h3>
+            <Link href={selectedAccountId ? `/account/${selectedAccountId}/webhooks` : "#"}>
+              <Button 
+                variant="ghost" 
+                size="sm" 
+                className="w-full justify-start"
+                disabled={!selectedAccountId}
+                data-testid="button-webhook-logs"
+              >
+                <Webhook className="h-4 w-4 mr-2" />
+                Webhook Logs
+              </Button>
+            </Link>
+          </div>
+
+          <div className="p-4 border-t">
           <div className="flex items-center justify-between">
             <div className="text-sm">
               <p className="font-medium">{user?.username}</p>

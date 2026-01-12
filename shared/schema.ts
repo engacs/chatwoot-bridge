@@ -106,6 +106,20 @@ export const webhookEvents = pgTable("webhook_events", {
 
 export type WebhookEvent = typeof webhookEvents.$inferSelect;
 
+// Debug Webhook logs - separate from processed events
+export const webhookLogs = pgTable("webhook_logs", {
+  id: serial("id").primaryKey(),
+  whatsappAccountId: integer("whatsapp_account_id").references(() => whatsappAccounts.id, { onDelete: "set null" }),
+  method: text("method").notNull(),
+  url: text("url").notNull(),
+  headers: jsonb("headers").notNull(),
+  body: jsonb("body").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export type WebhookLog = typeof webhookLogs.$inferSelect;
+export type InsertWebhookLog = typeof webhookLogs.$inferInsert;
+
 // Relations - defined after all tables
 export const usersRelations = relations(users, ({ many }) => ({
   whatsappAccounts: many(whatsappAccounts),

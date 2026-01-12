@@ -46,6 +46,11 @@ export interface IStorage {
   getWebhookEvents(whatsappAccountId: number, limit?: number): Promise<WebhookEvent[]>;
   addWebhookEvent(event: Omit<WebhookEvent, "id" | "processedAt">): Promise<WebhookEvent>;
   deleteOldWebhookEvents(olderThanDays: number): Promise<number>;
+
+  // Webhook Debug Logs
+  getWebhookLogs(whatsappAccountId: number, limit?: number): Promise<WebhookLog[]>;
+  addWebhookLog(log: Omit<WebhookLog, "id" | "createdAt">): Promise<WebhookLog>;
+  deleteOldWebhookLogs(olderThanDays: number): Promise<number>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -215,6 +220,28 @@ export class DatabaseStorage implements IStorage {
     const result = await db.delete(webhookEvents).where(lt(webhookEvents.processedAt, cutoffDate)).returning();
     return result.length;
   }
+
+  // Webhook Debug Logs
+  async getWebhookLogs(whatsappAccountId: number, limit: number = 50): Promise<WebhookLog[]> {
+    return db
+      .select()
+      .from(webhookLogs)
+      .where(eq(webhookLogs.whatsappAccountId, whatsappAccountId))
+      .orderBy(desc(webhookLogs.createdAt))
+      .limit(limit);
+  }
+
+  async addWebhookLog(log: Omit<WebhookLog, "id" | "createdAt">): Promise<WebhookLog> {
+    const [created] = await db.insert(webhookLogs).values(log).returning();
+    return created;
+  }
+
+  async deleteOldWebhookLogs(olderThanDays: number): Promise<number> {
+    const cutoffDate = new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - olderThanDays);
+    const result = await db.delete(webhookLogs).where(lt(webhookLogs.createdAt, cutoffDate)).returning();
+    return result.length;
+  }
 }
 
 export const storage = new DatabaseStorage();
@@ -225,8 +252,9 @@ export function startCleanupJob() {
     try {
       const deletedMessages = await storage.deleteOldMessageLogs(1); // 1 day
       const deletedWebhooks = await storage.deleteOldWebhookEvents(1); // 1 day
-      if (deletedMessages > 0 || deletedWebhooks > 0) {
-        console.log(`[Cleanup] Deleted ${deletedMessages} old messages and ${deletedWebhooks} old webhook events`);
+      const deletedWebhookLogs = await storage.deleteOldWebhookLogs(1); // 1 day
+      if (deletedMessages > 0 || deletedWebhooks > 0 || deletedWebhookLogs > 0) {
+        console.log(`[Cleanup] Deleted ${deletedMessages} messages, ${deletedWebhooks} events, ${deletedWebhookLogs} webhook logs`);
       }
     } catch (error) {
       console.error("[Cleanup] Error during cleanup:", error);
