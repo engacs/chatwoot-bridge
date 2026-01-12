@@ -254,7 +254,7 @@ export class ConnectionManager extends EventEmitter {
     });
   }
 
-  async disconnectAccount(accountId: number): Promise<void> {
+  async disconnectAccount(accountId: number, clearSession: boolean = false): Promise<void> {
     const connData = this.connections.get(accountId);
     if (connData?.socket) {
       const socket = connData.socket;
@@ -262,10 +262,33 @@ export class ConnectionManager extends EventEmitter {
       this.connections.delete(accountId);
       socket.end(undefined);
     }
-    await storage.updateWhatsappAccount(accountId, { 
-      status: "disconnected", 
-      qrCode: null 
-    });
+
+    // Delete session files if requested (user-initiated disconnect)
+    if (clearSession) {
+      const account = await storage.getWhatsappAccount(accountId);
+      if (account?.sessionPath) {
+        const sessionDir = path.join(process.cwd(), "server", "sessions", account.sessionPath);
+        try {
+          await fs.rm(sessionDir, { recursive: true, force: true });
+          console.log(`[ConnectionManager] Deleted session files for account ${accountId}: ${sessionDir}`);
+        } catch (err) {
+          console.error(`[ConnectionManager] Failed to delete session files:`, err);
+        }
+      }
+      // Clear phone number and last connected since session is gone
+      await storage.updateWhatsappAccount(accountId, { 
+        status: "disconnected", 
+        qrCode: null,
+        phoneNumber: null,
+        lastConnectedAt: null
+      });
+    } else {
+      await storage.updateWhatsappAccount(accountId, { 
+        status: "disconnected", 
+        qrCode: null 
+      });
+    }
+    
     this.emit("status", accountId, "disconnected");
   }
 

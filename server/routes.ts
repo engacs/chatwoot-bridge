@@ -452,8 +452,8 @@ export async function registerRoutes(httpServer: Server, app: Express) {
         return res.status(403).json({ error: "Access denied" });
       }
 
-      // Disconnect if connected
-      await connectionManager.disconnectAccount(accountId);
+      // Disconnect if connected and clear session files
+      await connectionManager.disconnectAccount(accountId, true);
       
       // Delete from database
       await storage.deleteWhatsappAccount(accountId);
@@ -501,7 +501,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
         return res.status(403).json({ error: "Access denied" });
       }
 
-      await connectionManager.disconnectAccount(accountId);
+      await connectionManager.disconnectAccount(accountId, true);
       res.json({ success: true, status: "disconnected" });
     } catch (error) {
       console.error("[API] Error disconnecting account:", error);
