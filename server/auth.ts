@@ -76,6 +76,11 @@ export function setupAuth(app: Express) {
             return done(null, false, { message: "Invalid username or password" });
           }
 
+          // Check if user is disabled
+          if (!user.isEnabled) {
+            return done(null, false, { message: "Your account has been disabled" });
+          }
+
           const isValid = await comparePassword(password, user.password);
           if (!isValid) {
             return done(null, false, { message: "Invalid username or password" });

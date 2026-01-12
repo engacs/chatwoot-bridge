@@ -2,6 +2,7 @@ import type { Express, Request, Response, NextFunction } from "express";
 import type { Server } from "http";
 import passport from "passport";
 import crypto from "crypto";
+import bcrypt from "bcrypt";
 import { z } from "zod";
 import { storage } from "./storage";
 import { setupAuth, hashPassword } from "./auth";
@@ -42,6 +43,12 @@ export async function registerRoutes(httpServer: Server, app: Express) {
   
   app.post("/api/auth/register", async (req: Request, res: Response) => {
     try {
+      // Check if signup is disabled
+      const signupDisabled = await storage.getSetting("signup_disabled");
+      if (signupDisabled === "true") {
+        return res.status(403).json({ error: "Registration is currently disabled" });
+      }
+
       const { username, email, password } = req.body;
       
       if (!username || !email || !password) {
@@ -141,11 +148,45 @@ export async function registerRoutes(httpServer: Server, app: Express) {
         username: u.username,
         email: u.email,
         isAdmin: u.isAdmin,
+        isEnabled: u.isEnabled,
         createdAt: u.createdAt,
       })));
     } catch (error) {
       console.error("[Admin] Error getting users:", error);
       res.status(500).json({ error: "Failed to get users" });
+    }
+  });
+
+  // Create user (admin only)
+  app.post("/api/admin/users", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const { username, email, password, isAdmin } = req.body;
+      
+      if (!username || !email || !password) {
+        return res.status(400).json({ error: "Username, email, and password are required" });
+      }
+
+      const existingUser = await storage.getUserByUsername(username);
+      if (existingUser) {
+        return res.status(400).json({ error: "Username already exists" });
+      }
+
+      const existingEmail = await storage.getUserByEmail(email);
+      if (existingEmail) {
+        return res.status(400).json({ error: "Email already exists" });
+      }
+
+      const hashedPassword = await bcrypt.hash(password, 10);
+      const user = await storage.createUser({ username, email, password: hashedPassword });
+      
+      if (isAdmin) {
+        await storage.updateUser(user.id, { isAdmin: true });
+      }
+
+      res.json({ id: user.id, username: user.username, email: user.email, isAdmin: isAdmin || false });
+    } catch (error) {
+      console.error("[Admin] Error creating user:", error);
+      res.status(500).json({ error: "Failed to create user" });
     }
   });
 
@@ -171,18 +212,31 @@ export async function registerRoutes(httpServer: Server, app: Express) {
   app.patch("/api/admin/users/:id", requireAdmin, async (req: Request, res: Response) => {
     try {
       const userId = parseInt(req.params.id);
-      const { isAdmin } = req.body;
+      const { isAdmin, isEnabled } = req.body;
       
-      if (typeof isAdmin !== "boolean") {
-        return res.status(400).json({ error: "isAdmin must be a boolean" });
+      const updates: { isAdmin?: boolean; isEnabled?: boolean } = {};
+
+      if (typeof isAdmin === "boolean") {
+        // Prevent removing own admin status
+        if (userId === req.user!.id && !isAdmin) {
+          return res.status(400).json({ error: "Cannot remove your own admin status" });
+        }
+        updates.isAdmin = isAdmin;
       }
 
-      // Prevent removing own admin status
-      if (userId === req.user!.id && !isAdmin) {
-        return res.status(400).json({ error: "Cannot remove your own admin status" });
+      if (typeof isEnabled === "boolean") {
+        // Prevent disabling self
+        if (userId === req.user!.id && !isEnabled) {
+          return res.status(400).json({ error: "Cannot disable your own account" });
+        }
+        updates.isEnabled = isEnabled;
       }
 
-      const updated = await storage.updateUser(userId, { isAdmin });
+      if (Object.keys(updates).length === 0) {
+        return res.status(400).json({ error: "No valid updates provided" });
+      }
+
+      const updated = await storage.updateUser(userId, updates);
       if (!updated) {
         return res.status(404).json({ error: "User not found" });
       }
@@ -191,11 +245,36 @@ export async function registerRoutes(httpServer: Server, app: Express) {
         id: updated.id, 
         username: updated.username, 
         email: updated.email, 
-        isAdmin: updated.isAdmin 
+        isAdmin: updated.isAdmin,
+        isEnabled: updated.isEnabled
       });
     } catch (error) {
       console.error("[Admin] Error updating user:", error);
       res.status(500).json({ error: "Failed to update user" });
+    }
+  });
+
+  // Change user password (admin only)
+  app.patch("/api/admin/users/:id/password", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const userId = parseInt(req.params.id);
+      const { password } = req.body;
+      
+      if (!password || password.length < 6) {
+        return res.status(400).json({ error: "Password must be at least 6 characters" });
+      }
+
+      const hashedPassword = await bcrypt.hash(password, 10);
+      const updated = await storage.updateUser(userId, { password: hashedPassword });
+      
+      if (!updated) {
+        return res.status(404).json({ error: "User not found" });
+      }
+
+      res.json({ success: true });
+    } catch (error) {
+      console.error("[Admin] Error changing password:", error);
+      res.status(500).json({ error: "Failed to change password" });
     }
   });
 
@@ -236,6 +315,34 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     } catch (error) {
       console.error("[Admin] Error getting stats:", error);
       res.status(500).json({ error: "Failed to get stats" });
+    }
+  });
+
+  // App settings routes (admin only)
+  app.get("/api/admin/settings", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const signupDisabled = await storage.getSetting("signup_disabled");
+      res.json({
+        signupDisabled: signupDisabled === "true",
+      });
+    } catch (error) {
+      console.error("[Admin] Error getting settings:", error);
+      res.status(500).json({ error: "Failed to get settings" });
+    }
+  });
+
+  app.patch("/api/admin/settings", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const { signupDisabled } = req.body;
+      
+      if (typeof signupDisabled === "boolean") {
+        await storage.setSetting("signup_disabled", signupDisabled.toString());
+      }
+
+      res.json({ success: true });
+    } catch (error) {
+      console.error("[Admin] Error updating settings:", error);
+      res.status(500).json({ error: "Failed to update settings" });
     }
   });
 

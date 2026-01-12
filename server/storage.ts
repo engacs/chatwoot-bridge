@@ -3,7 +3,8 @@ import {
   whatsappAccounts, type WhatsappAccount, type InsertWhatsappAccount,
   chatwootConfigs, type ChatwootConfig, type InsertChatwootConfig,
   messageLogs, type MessageLog,
-  webhookEvents, type WebhookEvent
+  webhookEvents, type WebhookEvent,
+  appSettings, type AppSetting
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, and } from "drizzle-orm";
@@ -17,6 +18,10 @@ export interface IStorage {
   getAllUsers(): Promise<User[]>;
   updateUser(id: number, updates: Partial<User>): Promise<User | undefined>;
   deleteUser(id: number): Promise<boolean>;
+  
+  // App Settings
+  getSetting(key: string): Promise<string | undefined>;
+  setSetting(key: string, value: string): Promise<void>;
   
   // WhatsApp Accounts
   getWhatsappAccount(id: number): Promise<WhatsappAccount | undefined>;
@@ -79,6 +84,21 @@ export class DatabaseStorage implements IStorage {
   async deleteUser(id: number): Promise<boolean> {
     const result = await db.delete(users).where(eq(users.id, id)).returning();
     return result.length > 0;
+  }
+
+  // App Settings
+  async getSetting(key: string): Promise<string | undefined> {
+    const [setting] = await db.select().from(appSettings).where(eq(appSettings.key, key));
+    return setting?.value;
+  }
+
+  async setSetting(key: string, value: string): Promise<void> {
+    const existing = await this.getSetting(key);
+    if (existing !== undefined) {
+      await db.update(appSettings).set({ value, updatedAt: new Date() }).where(eq(appSettings.key, key));
+    } else {
+      await db.insert(appSettings).values({ key, value });
+    }
   }
 
   // WhatsApp Accounts
