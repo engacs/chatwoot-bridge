@@ -417,7 +417,7 @@ export default function AdminPage() {
                                       type="password"
                                       value={passwordValue}
                                       onChange={(e) => setPasswordValue(e.target.value)}
-                                      placeholder="Enter new password (min 6 characters)"
+                                      placeholder="Enter new password (min 8 characters)"
                                       data-testid="input-change-password"
                                     />
                                   </div>

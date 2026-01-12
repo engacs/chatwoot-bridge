@@ -166,6 +166,10 @@ export async function registerRoutes(httpServer: Server, app: Express) {
         return res.status(400).json({ error: "Username, email, and password are required" });
       }
 
+      if (password.length < 8) {
+        return res.status(400).json({ error: "Password must be at least 8 characters" });
+      }
+
       const existingUser = await storage.getUserByUsername(username);
       if (existingUser) {
         return res.status(400).json({ error: "Username already exists" });
@@ -260,8 +264,8 @@ export async function registerRoutes(httpServer: Server, app: Express) {
       const userId = parseInt(req.params.id);
       const { password } = req.body;
       
-      if (!password || password.length < 6) {
-        return res.status(400).json({ error: "Password must be at least 6 characters" });
+      if (!password || password.length < 8) {
+        return res.status(400).json({ error: "Password must be at least 8 characters" });
       }
 
       const hashedPassword = await bcrypt.hash(password, 10);
@@ -278,26 +282,6 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     }
   });
 
-  app.delete("/api/admin/users/:id", requireAdmin, async (req: Request, res: Response) => {
-    try {
-      const userId = parseInt(req.params.id);
-      
-      // Prevent deleting self
-      if (userId === req.user!.id) {
-        return res.status(400).json({ error: "Cannot delete your own account" });
-      }
-
-      const deleted = await storage.deleteUser(userId);
-      if (!deleted) {
-        return res.status(404).json({ error: "User not found" });
-      }
-
-      res.json({ success: true });
-    } catch (error) {
-      console.error("[Admin] Error deleting user:", error);
-      res.status(500).json({ error: "Failed to delete user" });
-    }
-  });
 
   app.get("/api/admin/stats", requireAdmin, async (req: Request, res: Response) => {
     try {
