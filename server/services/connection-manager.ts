@@ -181,8 +181,12 @@ export class ConnectionManager extends EventEmitter {
           try {
             const lidMapping = (socket as any).signalRepository?.lidMapping;
             if (lidMapping?.getPNForLID) {
-              const phoneNumber = lidMapping.getPNForLID(remoteJid);
-              if (phoneNumber) {
+              let phoneNumber = lidMapping.getPNForLID(remoteJid);
+              // Handle if it returns a Promise
+              if (phoneNumber && typeof phoneNumber.then === 'function') {
+                phoneNumber = await phoneNumber;
+              }
+              if (phoneNumber && typeof phoneNumber === 'string') {
                 console.log(`[ConnectionManager] Resolved LID ${remoteJid} to ${phoneNumber}`);
                 remoteJid = phoneNumber;
               } else {
