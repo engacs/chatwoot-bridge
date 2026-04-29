@@ -14,6 +14,8 @@ declare global {
       id: number;
       username: string;
       email: string;
+      isAdmin: boolean;
+      isEnabled: boolean;
     }
   }
 }
@@ -47,7 +49,10 @@ export function setupAuth(app: Express) {
       resave: false,
       saveUninitialized: false,
       cookie: {
-        secure: process.env.NODE_ENV === "production",
+        // Only enforce Secure flag when explicitly enabled (i.e. running behind HTTPS).
+        // Do NOT tie this to NODE_ENV — production servers served over plain HTTP
+        // (e.g. behind a local proxy or direct PM2) lose the session cookie on reload.
+        secure: process.env.SESSION_SECURE_COOKIE === "true",
         httpOnly: true,
         maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
         sameSite: "lax",
@@ -90,6 +95,8 @@ export function setupAuth(app: Express) {
             id: user.id,
             username: user.username,
             email: user.email,
+            isAdmin: user.isAdmin,
+            isEnabled: user.isEnabled,
           });
         } catch (error) {
           return done(error);
@@ -112,6 +119,8 @@ export function setupAuth(app: Express) {
         id: user.id,
         username: user.username,
         email: user.email,
+        isAdmin: user.isAdmin,
+        isEnabled: user.isEnabled,
       });
     } catch (error) {
       done(error);

@@ -177,6 +177,33 @@ export default function AdminPage() {
       toast({ title: "Failed to delete user", description: error.message, variant: "destructive" });
     },
   });
+  
+  const disconnectAccountMutation = useMutation({
+    mutationFn: async (accountId: number) => {
+      return apiRequest("POST", `/api/whatsapp/accounts/${accountId}/disconnect`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/accounts"] });
+      toast({ title: "Account disconnected successfully" });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Failed to disconnect account", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const deleteAccountMutation = useMutation({
+    mutationFn: async (accountId: number) => {
+      return apiRequest("DELETE", `/api/whatsapp/accounts/${accountId}`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/accounts"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/stats"] });
+      toast({ title: "Account deleted successfully" });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Failed to delete account", description: error.message, variant: "destructive" });
+    },
+  });
 
   const handleCreateUser = () => {
     if (!newUsername || !newEmail || !newPassword) {
@@ -509,6 +536,34 @@ export default function AdminPage() {
                           <Badge variant={account.isConnected ? "default" : "secondary"}>
                             {account.isConnected ? "Connected" : "Disconnected"}
                           </Badge>
+                          <div className="flex items-center gap-2">
+                            {account.isConnected && (
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => disconnectAccountMutation.mutate(account.id)}
+                                disabled={disconnectAccountMutation.isPending}
+                                title="Disconnect Account"
+                                data-testid={`button-disconnect-account-${account.id}`}
+                              >
+                                <WifiOff className="h-4 w-4 text-orange-500" />
+                              </Button>
+                            )}
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => {
+                                if (confirm(`Are you sure you want to delete account "${account.label}"?`)) {
+                                  deleteAccountMutation.mutate(account.id);
+                                }
+                              }}
+                              disabled={deleteAccountMutation.isPending}
+                              title="Delete Account"
+                              data-testid={`button-delete-account-${account.id}`}
+                            >
+                              <Trash2 className="h-4 w-4 text-red-500" />
+                            </Button>
+                          </div>
                         </div>
                       </div>
                     ))}

@@ -1,5 +1,5 @@
-import { 
-  users, type User, type InsertUser, 
+import {
+  users, type User, type InsertUser,
   whatsappAccounts, type WhatsappAccount, type InsertWhatsappAccount,
   chatwootConfigs, type ChatwootConfig, type InsertChatwootConfig,
   messageLogs, type MessageLog,
@@ -19,11 +19,11 @@ export interface IStorage {
   getAllUsers(): Promise<User[]>;
   updateUser(id: number, updates: Partial<User>): Promise<User | undefined>;
   deleteUser(id: number): Promise<boolean>;
-  
+
   // App Settings
   getSetting(key: string): Promise<string | undefined>;
   setSetting(key: string, value: string): Promise<void>;
-  
+
   // WhatsApp Accounts
   getWhatsappAccount(id: number): Promise<WhatsappAccount | undefined>;
   getWhatsappAccountsByUser(userId: number): Promise<WhatsappAccount[]>;
@@ -31,18 +31,18 @@ export interface IStorage {
   createWhatsappAccount(account: InsertWhatsappAccount & { sessionPath: string }): Promise<WhatsappAccount>;
   updateWhatsappAccount(id: number, updates: Partial<WhatsappAccount>): Promise<WhatsappAccount | undefined>;
   deleteWhatsappAccount(id: number): Promise<boolean>;
-  
+
   // Chatwoot Configs
   getChatwootConfig(whatsappAccountId: number): Promise<ChatwootConfig | undefined>;
   upsertChatwootConfig(config: InsertChatwootConfig): Promise<ChatwootConfig>;
   deleteChatwootConfig(whatsappAccountId: number): Promise<boolean>;
-  
+
   // Message Logs
   getMessageLogs(whatsappAccountId: number, limit?: number): Promise<MessageLog[]>;
   addMessageLog(log: Omit<MessageLog, "id" | "createdAt">): Promise<MessageLog>;
   getMessageByWhatsAppId(whatsappAccountId: number, whatsappId: string): Promise<MessageLog | undefined>;
   deleteOldMessageLogs(olderThanDays: number): Promise<number>;
-  
+
   // Webhook Events
   getWebhookEvents(whatsappAccountId: number, limit?: number): Promise<WebhookEvent[]>;
   addWebhookEvent(event: Omit<WebhookEvent, "id" | "processedAt">): Promise<WebhookEvent>;
@@ -270,7 +270,7 @@ export function startCleanupJob() {
 
   // Run immediately on startup
   runCleanup();
-  
+
   // Then run every hour
   setInterval(runCleanup, 60 * 60 * 1000);
 }

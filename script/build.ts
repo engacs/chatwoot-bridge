@@ -38,25 +38,15 @@ async function buildAll() {
   console.log("building client...");
   await viteBuild();
 
-  console.log("building server...");
-  const pkg = JSON.parse(await readFile("package.json", "utf-8"));
-  const allDeps = [
-    ...Object.keys(pkg.dependencies || {}),
-    ...Object.keys(pkg.devDependencies || {}),
-  ];
-  const externals = allDeps.filter((dep) => !allowlist.includes(dep));
-
+  console.log("building server with tsc...");
+  // Compile server code to ESM using tsc
   await esbuild({
     entryPoints: ["server/index.ts"],
     platform: "node",
-    bundle: true,
-    format: "cjs",
-    outfile: "dist/index.cjs",
-    define: {
-      "process.env.NODE_ENV": '"production"',
-    },
-    minify: true,
-    external: externals,
+    bundle: false,
+    format: "esm",
+    outdir: "dist",
+    tsconfig: "tsconfig.json",
     logLevel: "info",
   });
 }

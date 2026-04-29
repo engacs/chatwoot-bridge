@@ -1,3 +1,4 @@
+import "dotenv/config";
 import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
@@ -6,6 +7,9 @@ import { startCleanupJob } from "./storage";
 
 const app = express();
 const httpServer = createServer(app);
+
+// Trust the first proxy hop (e.g. Nginx) so req.secure and cookies work correctly
+app.set("trust proxy", 1);
 
 declare module "http" {
   interface IncomingMessage {
@@ -71,7 +75,7 @@ app.use((req, res, next) => {
     const message = err.message || "Internal Server Error";
 
     res.status(status).json({ message });
-    throw err;
+    console.error(err);
   });
 
   // importantly only setup vite in development and after
@@ -93,7 +97,6 @@ app.use((req, res, next) => {
     {
       port,
       host: "0.0.0.0",
-      reusePort: true,
     },
     () => {
       log(`serving on port ${port}`);

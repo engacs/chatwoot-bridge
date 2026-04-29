@@ -78,7 +78,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
       });
 
       // Log the user in
-      req.login({ id: user.id, username: user.username, email: user.email }, (err) => {
+      req.login({ id: user.id, username: user.username, email: user.email, isAdmin: user.isAdmin, isEnabled: user.isEnabled }, (err) => {
         if (err) {
           return res.status(500).json({ error: "Failed to log in" });
         }
@@ -402,7 +402,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
         return res.status(404).json({ error: "Account not found" });
       }
       
-      if (account.userId !== req.user!.id) {
+      if (account.userId !== req.user!.id && !req.user!.isAdmin) {
         return res.status(403).json({ error: "Access denied" });
       }
 
@@ -423,7 +423,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
         return res.status(404).json({ error: "Account not found" });
       }
       
-      if (account.userId !== req.user!.id) {
+      if (account.userId !== req.user!.id && !req.user!.isAdmin) {
         return res.status(403).json({ error: "Access denied" });
       }
 
@@ -448,7 +448,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
         return res.status(404).json({ error: "Account not found" });
       }
       
-      if (account.userId !== req.user!.id) {
+      if (account.userId !== req.user!.id && !req.user!.isAdmin) {
         return res.status(403).json({ error: "Access denied" });
       }
 
@@ -476,7 +476,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
         return res.status(404).json({ error: "Account not found" });
       }
       
-      if (account.userId !== req.user!.id) {
+      if (account.userId !== req.user!.id && !req.user!.isAdmin) {
         return res.status(403).json({ error: "Access denied" });
       }
 
@@ -497,7 +497,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
         return res.status(404).json({ error: "Account not found" });
       }
       
-      if (account.userId !== req.user!.id) {
+      if (account.userId !== req.user!.id && !req.user!.isAdmin) {
         return res.status(403).json({ error: "Access denied" });
       }
 
@@ -520,7 +520,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
         return res.status(404).json({ error: "Account not found" });
       }
       
-      if (account.userId !== req.user!.id) {
+      if (account.userId !== req.user!.id && !req.user!.isAdmin) {
         return res.status(403).json({ error: "Access denied" });
       }
 
@@ -552,7 +552,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
         return res.status(404).json({ error: "Account not found" });
       }
       
-      if (account.userId !== req.user!.id) {
+      if (account.userId !== req.user!.id && !req.user!.isAdmin) {
         return res.status(403).json({ error: "Access denied" });
       }
 
@@ -598,7 +598,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
         return res.status(404).json({ error: "Account not found" });
       }
       
-      if (account.userId !== req.user!.id) {
+      if (account.userId !== req.user!.id && !req.user!.isAdmin) {
         return res.status(403).json({ error: "Access denied" });
       }
 
@@ -614,14 +614,15 @@ export async function registerRoutes(httpServer: Server, app: Express) {
   app.get("/api/whatsapp/accounts/:id/logs/export", requireAuth, async (req: Request, res: Response) => {
     try {
       const accountId = parseInt(req.params.id);
-      const format = req.query.format as string || "json";
+      const formatParam = req.query.format as string;
+      const format = formatParam === "csv" ? "csv" : "json";
       const account = await storage.getWhatsappAccount(accountId);
       
       if (!account) {
         return res.status(404).json({ error: "Account not found" });
       }
       
-      if (account.userId !== req.user!.id) {
+      if (account.userId !== req.user!.id && !req.user!.isAdmin) {
         return res.status(403).json({ error: "Access denied" });
       }
 
@@ -630,7 +631,11 @@ export async function registerRoutes(httpServer: Server, app: Express) {
 
       const escapeCSV = (value: string | null | undefined): string => {
         if (value === null || value === undefined) return '""';
-        const str = String(value);
+        let str = String(value);
+        // Prevent formula injection: prefix cells starting with =, +, @, - with a tab
+        if (/^[=+@\-]/.test(str)) {
+          str = `\t${str}`;
+        }
         const escaped = str.replace(/"/g, '""');
         return `"${escaped}"`;
       };
@@ -674,7 +679,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
         return res.status(404).json({ error: "Account not found" });
       }
       
-      if (account.userId !== req.user!.id) {
+      if (account.userId !== req.user!.id && !req.user!.isAdmin) {
         return res.status(403).json({ error: "Access denied" });
       }
 
@@ -695,7 +700,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
         return res.status(404).json({ error: "Account not found" });
       }
       
-      if (account.userId !== req.user!.id) {
+      if (account.userId !== req.user!.id && !req.user!.isAdmin) {
         return res.status(403).json({ error: "Access denied" });
       }
 
@@ -719,7 +724,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
         return res.status(404).json({ error: "Account not found" });
       }
       
-      if (account.userId !== req.user!.id) {
+      if (account.userId !== req.user!.id && !req.user!.isAdmin) {
         return res.status(403).json({ error: "Access denied" });
       }
 
@@ -740,7 +745,10 @@ export async function registerRoutes(httpServer: Server, app: Express) {
   app.post("/api/webhook/chatwoot/:accountId", async (req: Request, res: Response) => {
     try {
       const accountId = parseInt(req.params.accountId);
-      
+      if (Number.isNaN(accountId)) {
+        return res.status(400).json({ error: "Invalid account ID" });
+      }
+
       const account = await storage.getWhatsappAccount(accountId);
       if (!account) {
         return res.status(404).json({ error: "Account not found" });
@@ -759,9 +767,10 @@ export async function registerRoutes(httpServer: Server, app: Express) {
           return res.status(401).json({ error: "Missing signature" });
         }
         
+        const rawBody = req.rawBody as Buffer;
         const expectedSignature = crypto
           .createHmac("sha256", chatwootConfig.webhookSecret)
-          .update(JSON.stringify(req.body))
+          .update(rawBody)
           .digest("hex");
         
         if (signature !== expectedSignature) {
