@@ -170,7 +170,7 @@ export class ConnectionManager extends EventEmitter {
       if (type !== "notify") return;
 
       const connData = this.connections.get(accountId);
-      if (!connData?.chatwootService) return;
+      if (!connData) return;
 
       for (const msg of messages) {
         if (msg.key.fromMe) continue;
@@ -205,6 +205,23 @@ export class ConnectionManager extends EventEmitter {
         }
 
         console.log(`[ConnectionManager] Account ${accountId} incoming: ${remoteJid} - ${content.substring(0, 50)}`);
+
+        // Always log incoming message regardless of Chatwoot config
+        await storage.addMessageLog({
+          whatsappAccountId: accountId,
+          direction: "incoming",
+          remoteJid,
+          remoteName: pushName,
+          chatwootMessageId: null,
+          whatsappMessageId: msg.key.id || null,
+          content: content.substring(0, 200),
+          status: connData.chatwootService ? "pending" : "no_chatwoot",
+        });
+
+        if (!connData.chatwootService) {
+          console.log(`[ConnectionManager] Account ${accountId} has no Chatwoot config, message logged only`);
+          continue;
+        }
 
         // Extract media if present
         let mediaBuffer: Buffer | null = null;
