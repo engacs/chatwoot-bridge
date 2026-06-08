@@ -45,6 +45,7 @@ export class ChatwootService {
     };
 
     let statusCode: number | undefined;
+    let responseBody: unknown = null;
     try {
       const response = await fetch(url, {
         method,
@@ -53,40 +54,38 @@ export class ChatwootService {
       });
 
       statusCode = response.status;
+      const responseText = await response.text();
+      try { responseBody = JSON.parse(responseText); } catch { responseBody = responseText; }
 
-      // Log outgoing request
       await storage.addWebhookLog({
         whatsappAccountId: this.whatsappAccountId,
         direction: "outgoing",
         method,
         url,
-        headers: { "Content-Type": "application/json" },
-        body: body || {},
+        headers: headers as Record<string, string>,
+        body: { request: body || {}, response: responseBody },
         statusCode,
       });
 
       if (!response.ok) {
-        const errorText = await response.text();
-        console.error(`[Chatwoot] API error: ${response.status} - ${errorText}`);
+        console.error(`[Chatwoot] API error: ${response.status} - ${responseText}`);
         return null;
       }
 
-      const data = await response.json();
-      return data as T;
+      return responseBody as T;
     } catch (error) {
       console.error(`[Chatwoot] Request failed:`, error);
-      
-      // Log failed outgoing request
+
       await storage.addWebhookLog({
         whatsappAccountId: this.whatsappAccountId,
         direction: "outgoing",
         method,
         url,
-        headers: { "Content-Type": "application/json" },
-        body: body || {},
+        headers: headers as Record<string, string>,
+        body: { request: body || {}, error: String(error) },
         statusCode: statusCode || 0,
       });
-      
+
       return null;
     }
   }

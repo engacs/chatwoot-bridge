@@ -204,35 +204,53 @@ export default function WebhooksPage() {
       </div>
 
       <Dialog open={!!selectedLog} onOpenChange={(open) => !open && setSelectedLog(null)}>
-        <DialogContent className="max-w-2xl max-h-[80vh] overflow-hidden flex flex-col">
+        <DialogContent className="max-w-3xl max-h-[90vh] overflow-hidden flex flex-col">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
+            <DialogTitle className="flex items-center gap-2 flex-wrap">
               <Code className="h-5 w-5" />
               {selectedLog?.direction === "incoming" ? "Incoming" : "Outgoing"} Request Details
-              {selectedLog?.statusCode && (
-                <Badge 
+              <Badge variant="outline" className="font-mono">{selectedLog?.method}</Badge>
+              {selectedLog?.statusCode != null && (
+                <Badge
                   variant={selectedLog.statusCode >= 200 && selectedLog.statusCode < 300 ? "default" : "destructive"}
-                  className="ml-2"
                 >
-                  Status: {selectedLog.statusCode}
+                  {selectedLog.statusCode}
                 </Badge>
+              )}
+              {selectedLog?.createdAt && (
+                <span className="text-xs text-muted-foreground font-normal">
+                  {new Date(selectedLog.createdAt).toLocaleString()}
+                </span>
               )}
             </DialogTitle>
           </DialogHeader>
-          <div className="space-y-4 flex-1 overflow-hidden flex flex-col">
-            <div>
-              <p className="text-sm font-medium mb-1">URL</p>
-              <code className="text-xs bg-muted p-2 rounded block break-all">{selectedLog?.url}</code>
+          <ScrollArea className="flex-1 pr-2">
+            <div className="space-y-4">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1">URL</p>
+                <code className="text-xs bg-muted p-2 rounded block break-all">{selectedLog?.url}</code>
+              </div>
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1">Headers</p>
+                <div className="bg-muted rounded-md p-3 space-y-1">
+                  {selectedLog?.headers && Object.entries(selectedLog.headers).map(([key, val]) => (
+                    <div key={key} className="flex gap-2 text-xs font-mono">
+                      <span className="text-blue-600 dark:text-blue-400 shrink-0">{key}:</span>
+                      <span className="break-all text-muted-foreground">{String(val)}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1">Body</p>
+                <div className="bg-muted rounded-md p-3">
+                  <pre className="text-xs font-mono whitespace-pre-wrap break-all">
+                    {JSON.stringify(selectedLog?.body, null, 2)}
+                  </pre>
+                </div>
+              </div>
             </div>
-            <div className="flex-1 overflow-hidden">
-              <p className="text-sm font-medium mb-1">Body</p>
-              <ScrollArea className="h-[300px] p-4 bg-muted rounded-md">
-                <pre className="text-xs font-mono whitespace-pre-wrap">
-                  {JSON.stringify(selectedLog?.body, null, 2)}
-                </pre>
-              </ScrollArea>
-            </div>
-          </div>
+          </ScrollArea>
         </DialogContent>
       </Dialog>
     </div>
