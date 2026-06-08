@@ -4,6 +4,7 @@ import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
 import { startCleanupJob } from "./storage";
+import { setupWebSocket } from "./ws";
 
 const app = express();
 const httpServer = createServer(app);
@@ -66,6 +67,7 @@ app.use((req, res, next) => {
 
 (async () => {
   await registerRoutes(httpServer, app);
+  setupWebSocket(httpServer);
 
   // Start cleanup job to delete old messages after 1 day
   startCleanupJob();

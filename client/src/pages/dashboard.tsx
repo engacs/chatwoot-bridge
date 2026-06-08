@@ -801,8 +801,34 @@ export default function Dashboard() {
 
   const { data: accounts = [], isLoading: accountsLoading, refetch: refetchAccounts } = useQuery<WhatsAppAccount[]>({
     queryKey: ["/api/whatsapp/accounts"],
-    refetchInterval: 3000,
   });
+
+  // WebSocket for real-time status and QR updates
+  useEffect(() => {
+    const proto = window.location.protocol === "https:" ? "wss" : "ws";
+    const ws = new WebSocket(`${proto}://${window.location.host}/ws`);
+
+    ws.onmessage = (event) => {
+      const msg = JSON.parse(event.data);
+      if (msg.type === "status" || msg.type === "qr") {
+        queryClient.setQueryData<WhatsAppAccount[]>(["/api/whatsapp/accounts"], (prev) =>
+          prev?.map(a =>
+            a.id === msg.accountId
+              ? { ...a, ...(msg.status && { status: msg.status }), ...(msg.qrCode && { qrCode: msg.qrCode }) }
+              : a
+          )
+        );
+      }
+    };
+
+    const ping = setInterval(() => {
+      if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "ping" }));
+    }, 30000);
+
+    ws.onclose = () => clearInterval(ping);
+
+    return () => { clearInterval(ping); ws.close(); };
+  }, []);
 
   const logoutMutation = useMutation({
     mutationFn: async () => {
