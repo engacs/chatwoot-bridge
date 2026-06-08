@@ -40,7 +40,7 @@ export const whatsappAccounts = mysqlTable("whatsapp_accounts", {
   userId: int("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   label: text("label").notNull(),
   phoneNumber: text("phone_number"),
-  status: text("status").notNull().default("disconnected"),
+  status: varchar("status", { length: 50 }).notNull().default("disconnected"),
   sessionPath: text("session_path").notNull(),
   qrCode: text("qr_code"),
   lastConnectedAt: timestamp("last_connected_at"),
