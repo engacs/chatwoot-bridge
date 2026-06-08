@@ -196,14 +196,17 @@ function AddAccountDialog({ onSuccess }: { onSuccess: () => void }) {
   );
 }
 
-function QRCodeCard({ 
-  account, 
-  onRefresh 
-}: { 
-  account: WhatsAppAccount; 
+const QR_TIMEOUT = 15;
+
+function QRCodeCard({
+  account,
+  onRefresh
+}: {
+  account: WhatsAppAccount;
   onRefresh: () => void;
 }) {
   const { toast } = useToast();
+  const [countdown, setCountdown] = useState(QR_TIMEOUT);
 
   const connectMutation = useMutation({
     mutationFn: async () => {
@@ -218,9 +221,30 @@ function QRCodeCard({
     },
   });
 
+  // Reset countdown whenever a new QR code arrives
+  useEffect(() => {
+    if (account.status !== "qr_ready") return;
+    setCountdown(QR_TIMEOUT);
+    const interval = setInterval(() => {
+      setCountdown(prev => {
+        if (prev <= 1) {
+          clearInterval(interval);
+          connectMutation.mutate();
+          return QR_TIMEOUT;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [account.qrCode, account.status]);
+
   if (account.status === "connected") {
     return null;
   }
+
+  const radius = 20;
+  const circumference = 2 * Math.PI * radius;
+  const progress = (countdown / QR_TIMEOUT) * circumference;
 
   return (
     <Card className="max-w-md mx-auto">
@@ -232,9 +256,35 @@ function QRCodeCard({
       </CardHeader>
       <CardContent className="flex flex-col items-center gap-4">
         {account.status === "qr_ready" && account.qrCode ? (
-          <div className="p-4 bg-white rounded-lg shadow-sm" data-testid="img-qr-code">
-            <img src={account.qrCode} alt="WhatsApp QR Code" className="w-64 h-64" />
-          </div>
+          <>
+            <div className="relative">
+              <div className="p-4 bg-white rounded-lg shadow-sm" data-testid="img-qr-code">
+                <img src={account.qrCode} alt="WhatsApp QR Code" className="w-64 h-64" />
+              </div>
+              <div className="absolute -top-3 -right-3 bg-background rounded-full p-1 shadow">
+                <svg width="48" height="48" viewBox="0 0 48 48">
+                  <circle cx="24" cy="24" r={radius} fill="none" stroke="#e5e7eb" strokeWidth="4" />
+                  <circle
+                    cx="24" cy="24" r={radius}
+                    fill="none"
+                    stroke={countdown <= 5 ? "#ef4444" : "#22c55e"}
+                    strokeWidth="4"
+                    strokeDasharray={circumference}
+                    strokeDashoffset={circumference - progress}
+                    strokeLinecap="round"
+                    transform="rotate(-90 24 24)"
+                    style={{ transition: "stroke-dashoffset 1s linear, stroke 0.3s" }}
+                  />
+                  <text x="24" y="28" textAnchor="middle" fontSize="13" fontWeight="bold" fill="currentColor">
+                    {countdown}
+                  </text>
+                </svg>
+              </div>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              QR code refreshes in {countdown}s
+            </p>
+          </>
         ) : account.status === "connecting" ? (
           <div className="flex flex-col items-center gap-3 py-8" data-testid="status-connecting">
             <Loader2 className="h-12 w-12 animate-spin text-muted-foreground" />
@@ -246,23 +296,24 @@ function QRCodeCard({
             <p className="text-sm text-muted-foreground">Not connected</p>
             <Button onClick={() => connectMutation.mutate()} disabled={connectMutation.isPending}>
               {connectMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-              Connect
+              Connect WhatsApp
             </Button>
           </div>
         )}
-        
+
         {account.status !== "disconnected" && (
-          <Button 
-            variant="outline" 
-            size="sm" 
-            onClick={onRefresh}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => connectMutation.mutate()}
+            disabled={connectMutation.isPending}
             data-testid="button-refresh-connection"
           >
             <RefreshCw className="h-4 w-4 mr-2" />
-            Refresh
+            New QR Code
           </Button>
         )}
-        
+
         <div className="text-xs text-muted-foreground text-center max-w-xs">
           Open WhatsApp on your phone, go to Settings &gt; Linked Devices &gt; Link a Device
         </div>
