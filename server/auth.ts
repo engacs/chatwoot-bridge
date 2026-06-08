@@ -5,8 +5,7 @@ import session from "express-session";
 import bcrypt from "bcrypt";
 import { storage } from "./storage";
 import type { User } from "@shared/schema";
-import connectPg from "connect-pg-simple";
-import { pool } from "./db";
+import MemoryStore from "memorystore";
 
 declare global {
   namespace Express {
@@ -31,20 +30,16 @@ export async function comparePassword(password: string, hash: string): Promise<b
 }
 
 export function setupAuth(app: Express) {
-  const PgSession = connectPg(session);
-  
+  const SessionStore = MemoryStore(session);
+
   const sessionSecret = process.env.SESSION_SECRET;
   if (!sessionSecret) {
     throw new Error("SESSION_SECRET environment variable is required");
   }
-  
+
   app.use(
     session({
-      store: new PgSession({
-        pool,
-        tableName: "user_sessions",
-        createTableIfMissing: true,
-      }),
+      store: new SessionStore({ checkPeriod: 86400000 }),
       secret: sessionSecret,
       resave: false,
       saveUninitialized: false,
