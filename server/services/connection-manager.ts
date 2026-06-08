@@ -40,7 +40,7 @@ export class ConnectionManager extends EventEmitter {
     return ConnectionManager.instance;
   }
 
-  async initializeAccount(accountId: number): Promise<void> {
+  async initializeAccount(accountId: number, freshStart: boolean = false): Promise<void> {
     const account = await storage.getWhatsappAccount(accountId);
     if (!account) {
       throw new Error(`Account ${accountId} not found`);
@@ -50,6 +50,12 @@ export class ConnectionManager extends EventEmitter {
     await this.disconnectAccount(accountId);
 
     const sessionDir = path.join(process.cwd(), "server", "sessions", account.sessionPath);
+
+    // Clear stale session so Baileys generates a fresh QR code
+    if (freshStart) {
+      await fs.rm(sessionDir, { recursive: true, force: true });
+    }
+
     await fs.mkdir(sessionDir, { recursive: true });
 
     const { state, saveCreds } = await useMultiFileAuthState(sessionDir);

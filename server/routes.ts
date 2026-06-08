@@ -480,7 +480,7 @@ export async function registerRoutes(httpServer: Server, app: Express) {
         return res.status(403).json({ error: "Access denied" });
       }
 
-      await connectionManager.initializeAccount(accountId);
+      await connectionManager.initializeAccount(accountId, true);
       res.json({ success: true, status: "connecting" });
     } catch (error) {
       console.error("[API] Error connecting account:", error);

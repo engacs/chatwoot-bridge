@@ -35,7 +35,7 @@ export function setupWebSocket(httpServer: Server) {
   });
 
   connectionManager.on("qr", (accountId: number, qrCode: string) => {
-    broadcast(wss, { type: "qr", accountId, qrCode });
+    broadcast(wss, { type: "qr", accountId, status: "qr_ready", qrCode });
   });
 
   return wss;
