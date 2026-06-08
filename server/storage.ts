@@ -73,7 +73,8 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createUser(insertUser: InsertUser): Promise<User> {
-    const [user] = await db.insert(users).values(insertUser).returning();
+    const result = await db.insert(users).values(insertUser);
+    const [user] = await db.select().from(users).where(eq(users.id, result[0].insertId));
     return user;
   }
 
@@ -82,17 +83,13 @@ export class DatabaseStorage implements IStorage {
   }
 
   async updateUser(id: number, updates: Partial<User>): Promise<User | undefined> {
-    const [updated] = await db
-      .update(users)
-      .set(updates)
-      .where(eq(users.id, id))
-      .returning();
-    return updated || undefined;
+    await db.update(users).set(updates).where(eq(users.id, id));
+    return this.getUser(id);
   }
 
   async deleteUser(id: number): Promise<boolean> {
-    const result = await db.delete(users).where(eq(users.id, id)).returning();
-    return result.length > 0;
+    const result = await db.delete(users).where(eq(users.id, id));
+    return result[0].affectedRows > 0;
   }
 
   // App Settings
@@ -125,22 +122,19 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createWhatsappAccount(account: InsertWhatsappAccount & { sessionPath: string }): Promise<WhatsappAccount> {
-    const [created] = await db.insert(whatsappAccounts).values(account).returning();
+    const result = await db.insert(whatsappAccounts).values(account);
+    const [created] = await db.select().from(whatsappAccounts).where(eq(whatsappAccounts.id, result[0].insertId));
     return created;
   }
 
   async updateWhatsappAccount(id: number, updates: Partial<WhatsappAccount>): Promise<WhatsappAccount | undefined> {
-    const [updated] = await db
-      .update(whatsappAccounts)
-      .set({ ...updates, updatedAt: new Date() })
-      .where(eq(whatsappAccounts.id, id))
-      .returning();
-    return updated || undefined;
+    await db.update(whatsappAccounts).set({ ...updates, updatedAt: new Date() }).where(eq(whatsappAccounts.id, id));
+    return this.getWhatsappAccount(id);
   }
 
   async deleteWhatsappAccount(id: number): Promise<boolean> {
-    const result = await db.delete(whatsappAccounts).where(eq(whatsappAccounts.id, id)).returning();
-    return result.length > 0;
+    const result = await db.delete(whatsappAccounts).where(eq(whatsappAccounts.id, id));
+    return result[0].affectedRows > 0;
   }
 
   // Chatwoot Configs
@@ -152,20 +146,19 @@ export class DatabaseStorage implements IStorage {
   async upsertChatwootConfig(config: InsertChatwootConfig): Promise<ChatwootConfig> {
     const existing = await this.getChatwootConfig(config.whatsappAccountId);
     if (existing) {
-      const [updated] = await db
-        .update(chatwootConfigs)
+      await db.update(chatwootConfigs)
         .set({ ...config, updatedAt: new Date() })
-        .where(eq(chatwootConfigs.whatsappAccountId, config.whatsappAccountId))
-        .returning();
-      return updated;
+        .where(eq(chatwootConfigs.whatsappAccountId, config.whatsappAccountId));
+      return (await this.getChatwootConfig(config.whatsappAccountId))!;
     }
-    const [created] = await db.insert(chatwootConfigs).values(config).returning();
+    const result = await db.insert(chatwootConfigs).values(config);
+    const [created] = await db.select().from(chatwootConfigs).where(eq(chatwootConfigs.id, result[0].insertId));
     return created;
   }
 
   async deleteChatwootConfig(whatsappAccountId: number): Promise<boolean> {
-    const result = await db.delete(chatwootConfigs).where(eq(chatwootConfigs.whatsappAccountId, whatsappAccountId)).returning();
-    return result.length > 0;
+    const result = await db.delete(chatwootConfigs).where(eq(chatwootConfigs.whatsappAccountId, whatsappAccountId));
+    return result[0].affectedRows > 0;
   }
 
   // Message Logs
@@ -179,7 +172,8 @@ export class DatabaseStorage implements IStorage {
   }
 
   async addMessageLog(log: Omit<MessageLog, "id" | "createdAt">): Promise<MessageLog> {
-    const [created] = await db.insert(messageLogs).values(log).returning();
+    const result = await db.insert(messageLogs).values(log);
+    const [created] = await db.select().from(messageLogs).where(eq(messageLogs.id, result[0].insertId));
     return created;
   }
 
@@ -197,8 +191,8 @@ export class DatabaseStorage implements IStorage {
   async deleteOldMessageLogs(olderThanDays: number): Promise<number> {
     const cutoffDate = new Date();
     cutoffDate.setDate(cutoffDate.getDate() - olderThanDays);
-    const result = await db.delete(messageLogs).where(lt(messageLogs.createdAt, cutoffDate)).returning();
-    return result.length;
+    const result = await db.delete(messageLogs).where(lt(messageLogs.createdAt, cutoffDate));
+    return result[0].affectedRows;
   }
 
   // Webhook Events
@@ -212,15 +206,16 @@ export class DatabaseStorage implements IStorage {
   }
 
   async addWebhookEvent(event: Omit<WebhookEvent, "id" | "processedAt">): Promise<WebhookEvent> {
-    const [created] = await db.insert(webhookEvents).values(event).returning();
+    const result = await db.insert(webhookEvents).values(event);
+    const [created] = await db.select().from(webhookEvents).where(eq(webhookEvents.id, result[0].insertId));
     return created;
   }
 
   async deleteOldWebhookEvents(olderThanDays: number): Promise<number> {
     const cutoffDate = new Date();
     cutoffDate.setDate(cutoffDate.getDate() - olderThanDays);
-    const result = await db.delete(webhookEvents).where(lt(webhookEvents.processedAt, cutoffDate)).returning();
-    return result.length;
+    const result = await db.delete(webhookEvents).where(lt(webhookEvents.processedAt, cutoffDate));
+    return result[0].affectedRows;
   }
 
   // Webhook Debug Logs
@@ -234,20 +229,21 @@ export class DatabaseStorage implements IStorage {
   }
 
   async addWebhookLog(log: Omit<WebhookLog, "id" | "createdAt">): Promise<WebhookLog> {
-    const [created] = await db.insert(webhookLogs).values(log).returning();
+    const result = await db.insert(webhookLogs).values(log);
+    const [created] = await db.select().from(webhookLogs).where(eq(webhookLogs.id, result[0].insertId));
     return created;
   }
 
   async deleteOldWebhookLogs(olderThanDays: number): Promise<number> {
     const cutoffDate = new Date();
     cutoffDate.setDate(cutoffDate.getDate() - olderThanDays);
-    const result = await db.delete(webhookLogs).where(lt(webhookLogs.createdAt, cutoffDate)).returning();
-    return result.length;
+    const result = await db.delete(webhookLogs).where(lt(webhookLogs.createdAt, cutoffDate));
+    return result[0].affectedRows;
   }
 
   async clearWebhookLogs(whatsappAccountId: number): Promise<number> {
-    const result = await db.delete(webhookLogs).where(eq(webhookLogs.whatsappAccountId, whatsappAccountId)).returning();
-    return result.length;
+    const result = await db.delete(webhookLogs).where(eq(webhookLogs.whatsappAccountId, whatsappAccountId));
+    return result[0].affectedRows;
   }
 }
 
@@ -257,9 +253,9 @@ export const storage = new DatabaseStorage();
 export function startCleanupJob() {
   const runCleanup = async () => {
     try {
-      const deletedMessages = await storage.deleteOldMessageLogs(1); // 1 day
-      const deletedWebhooks = await storage.deleteOldWebhookEvents(1); // 1 day
-      const deletedWebhookLogs = await storage.deleteOldWebhookLogs(1); // 1 day
+      const deletedMessages = await storage.deleteOldMessageLogs(1);
+      const deletedWebhooks = await storage.deleteOldWebhookEvents(1);
+      const deletedWebhookLogs = await storage.deleteOldWebhookLogs(1);
       if (deletedMessages > 0 || deletedWebhooks > 0 || deletedWebhookLogs > 0) {
         console.log(`[Cleanup] Deleted ${deletedMessages} messages, ${deletedWebhooks} events, ${deletedWebhookLogs} webhook logs`);
       }
@@ -268,9 +264,6 @@ export function startCleanupJob() {
     }
   };
 
-  // Run immediately on startup
   runCleanup();
-
-  // Then run every hour
   setInterval(runCleanup, 60 * 60 * 1000);
 }
