@@ -40,7 +40,7 @@ export class ConnectionManager extends EventEmitter {
     return ConnectionManager.instance;
   }
 
-  async initializeAccount(accountId: number, freshStart: boolean = false): Promise<void> {
+  async initializeAccount(accountId: number, freshStart: boolean = false, reconnectAttempt: number = 0): Promise<void> {
     const account = await storage.getWhatsappAccount(accountId);
     if (!account) {
       throw new Error(`Account ${accountId} not found`);
@@ -79,7 +79,7 @@ export class ConnectionManager extends EventEmitter {
     const connection: WhatsAppConnection = {
       socket,
       chatwootService: null,
-      reconnectAttempts: 0,
+      reconnectAttempts: reconnectAttempt,
       maxReconnectAttempts: 5,
     };
 
@@ -125,11 +125,11 @@ export class ConnectionManager extends EventEmitter {
         );
 
         if (shouldReconnect && connData.reconnectAttempts < connData.maxReconnectAttempts) {
-          connData.reconnectAttempts++;
-          const delay = Math.min(1000 * Math.pow(2, connData.reconnectAttempts), 30000);
-          console.log(`[ConnectionManager] Account ${accountId} reconnecting... Attempt ${connData.reconnectAttempts}/${connData.maxReconnectAttempts}`);
-          
-          setTimeout(() => this.initializeAccount(accountId), delay);
+          const nextAttempt = connData.reconnectAttempts + 1;
+          const delay = Math.min(1000 * Math.pow(2, nextAttempt), 30000);
+          console.log(`[ConnectionManager] Account ${accountId} reconnecting... Attempt ${nextAttempt}/${connData.maxReconnectAttempts}`);
+
+          setTimeout(() => this.initializeAccount(accountId, false, nextAttempt), delay);
         } else {
           await storage.updateWhatsappAccount(accountId, { 
             status: "disconnected", 
