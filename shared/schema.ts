@@ -1,13 +1,14 @@
 import { sql, relations } from "drizzle-orm";
 import { mysqlTable, text, varchar, timestamp, json, int, boolean } from "drizzle-orm/mysql-core";
+// Note: unique() on MySQL requires varchar (not text) — text columns have no length limit and can't be indexed directly
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
 // Users table - for authentication
 export const users = mysqlTable("users", {
   id: int("id").autoincrement().primaryKey(),
-  username: text("username").notNull().unique(),
-  email: text("email").notNull().unique(),
+  username: varchar("username", { length: 255 }).notNull().unique(),
+  email: varchar("email", { length: 255 }).notNull().unique(),
   password: text("password").notNull(),
   isAdmin: boolean("is_admin").notNull().default(false),
   isEnabled: boolean("is_enabled").notNull().default(true),
@@ -17,7 +18,7 @@ export const users = mysqlTable("users", {
 // App settings table - for global configuration
 export const appSettings = mysqlTable("app_settings", {
   id: int("id").autoincrement().primaryKey(),
-  key: text("key").notNull().unique(),
+  key: varchar("key", { length: 255 }).notNull().unique(),
   value: text("value").notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
