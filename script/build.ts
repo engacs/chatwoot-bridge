@@ -38,14 +38,14 @@ async function buildAll() {
   console.log("building client...");
   await viteBuild();
 
-  console.log("building server with tsc...");
-  // Compile server code to ESM using tsc
+  console.log("building server...");
   await esbuild({
     entryPoints: ["server/index.ts"],
     platform: "node",
-    bundle: false,
+    bundle: true,
     format: "esm",
-    outdir: "dist",
+    outfile: "dist/index.js",
+    packages: "external",
     tsconfig: "tsconfig.json",
     logLevel: "info",
   });
