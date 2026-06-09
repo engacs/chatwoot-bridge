@@ -558,17 +558,24 @@ export async function registerRoutes(httpServer: Server, app: Express) {
 
       const { baseUrl, apiToken, inboxId, accountId: chatwootAccountId, webhookSecret } = req.body;
 
-      if (!baseUrl || !apiToken || !inboxId || !chatwootAccountId) {
-        return res.status(400).json({ error: "All Chatwoot fields are required" });
+      const existingConfig = await storage.getChatwootConfig(accountId);
+
+      if (!baseUrl || !inboxId || !chatwootAccountId) {
+        return res.status(400).json({ error: "Base URL, inbox ID, and account ID are required" });
       }
+      if (!apiToken && !existingConfig) {
+        return res.status(400).json({ error: "API token is required for new configurations" });
+      }
+
+      const resolvedApiToken = apiToken || existingConfig!.apiToken;
 
       const config = await storage.upsertChatwootConfig({
         whatsappAccountId: accountId,
         baseUrl,
-        apiToken,
+        apiToken: resolvedApiToken,
         inboxId,
         accountId: chatwootAccountId,
-        webhookSecret: webhookSecret || null,
+        webhookSecret: webhookSecret || existingConfig?.webhookSecret || null,
       });
 
       // Update connection manager with new config
@@ -584,6 +591,51 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     } catch (error) {
       console.error("[API] Error saving Chatwoot config:", error);
       res.status(500).json({ error: "Failed to save config" });
+    }
+  });
+
+  // ========== LOG SETTINGS ROUTES ==========
+
+  app.get("/api/whatsapp/accounts/:id/log-settings", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const accountId = parseInt(req.params.id);
+      const account = await storage.getWhatsappAccount(accountId);
+      if (!account) return res.status(404).json({ error: "Account not found" });
+      if (account.userId !== req.user!.id && !req.user!.isAdmin) return res.status(403).json({ error: "Access denied" });
+
+      const logEnabled = await storage.getSetting(`account_${accountId}_log_enabled`);
+      const retentionMinutes = await storage.getSetting(`account_${accountId}_log_retention_minutes`);
+
+      res.json({
+        logEnabled: logEnabled !== "false",
+        retentionMinutes: retentionMinutes ? parseInt(retentionMinutes) : 0,
+      });
+    } catch (error) {
+      console.error("[API] Error getting log settings:", error);
+      res.status(500).json({ error: "Failed to get log settings" });
+    }
+  });
+
+  app.post("/api/whatsapp/accounts/:id/log-settings", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const accountId = parseInt(req.params.id);
+      const account = await storage.getWhatsappAccount(accountId);
+      if (!account) return res.status(404).json({ error: "Account not found" });
+      if (account.userId !== req.user!.id && !req.user!.isAdmin) return res.status(403).json({ error: "Access denied" });
+
+      const { logEnabled, retentionMinutes } = req.body;
+
+      if (typeof logEnabled === "boolean") {
+        await storage.setSetting(`account_${accountId}_log_enabled`, logEnabled.toString());
+      }
+      if (typeof retentionMinutes === "number") {
+        await storage.setSetting(`account_${accountId}_log_retention_minutes`, retentionMinutes.toString());
+      }
+
+      res.json({ success: true });
+    } catch (error) {
+      console.error("[API] Error saving log settings:", error);
+      res.status(500).json({ error: "Failed to save log settings" });
     }
   });
 

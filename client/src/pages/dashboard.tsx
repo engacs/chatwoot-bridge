@@ -9,10 +9,12 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
-import { 
-  Wifi, WifiOff, RefreshCw, Copy, Power, MessageSquare, ArrowDownLeft, ArrowUpRight, 
-  Clock, CheckCircle, XCircle, AlertCircle, Loader2, Plus, Settings, LogOut, Smartphone, Shield, Download, Trash2, Pencil, Check, X, Webhook
+import {
+  Wifi, WifiOff, RefreshCw, Copy, Power, MessageSquare, ArrowDownLeft, ArrowUpRight,
+  Clock, CheckCircle, XCircle, AlertCircle, Loader2, Plus, Settings, LogOut, Smartphone, Shield, Download, Trash2, Pencil, Check, X, Webhook, StopCircle, ToggleLeft, ToggleRight, Timer
 } from "lucide-react";
+import { Switch } from "@/components/ui/switch";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useEffect, useState } from "react";
 import {
   Dialog,
@@ -223,6 +225,19 @@ function QRCodeCard({
     },
   });
 
+  const stopMutation = useMutation({
+    mutationFn: async () => {
+      await apiRequest("POST", `/api/whatsapp/accounts/${account.id}/disconnect`);
+    },
+    onSuccess: () => {
+      toast({ title: "Stopped", description: "Connection attempt cancelled" });
+      onRefresh();
+    },
+    onError: (error: Error) => {
+      toast({ title: "Stop failed", description: error.message, variant: "destructive" });
+    },
+  });
+
   // Countdown timer — when it hits 0, mark expired and stop
   useEffect(() => {
     if (account.status !== "qr_ready") return;
@@ -304,6 +319,20 @@ function QRCodeCard({
           <div className="flex flex-col items-center gap-3 py-8" data-testid="status-connecting">
             <Loader2 className="h-12 w-12 animate-spin text-muted-foreground" />
             <p className="text-sm text-muted-foreground">Connecting to WhatsApp...</p>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => stopMutation.mutate()}
+              disabled={stopMutation.isPending}
+              data-testid="button-stop-connecting"
+            >
+              {stopMutation.isPending ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : (
+                <StopCircle className="h-4 w-4 mr-2" />
+              )}
+              Stop
+            </Button>
           </div>
         ) : (
           <div className="flex flex-col items-center gap-3 py-8" data-testid="status-disconnected">
@@ -414,13 +443,14 @@ function ChatwootConfigCard({ accountId }: { accountId: number }) {
 
   const saveMutation = useMutation({
     mutationFn: async () => {
-      await apiRequest("POST", `/api/whatsapp/accounts/${accountId}/chatwoot`, {
+      const payload: Record<string, string | undefined> = {
         baseUrl,
-        apiToken,
         inboxId,
         accountId: chatwootAccountId,
         webhookSecret: webhookSecret || undefined,
-      });
+      };
+      if (apiToken) payload.apiToken = apiToken;
+      await apiRequest("POST", `/api/whatsapp/accounts/${accountId}/chatwoot`, payload);
     },
     onSuccess: () => {
       toast({ title: "Saved", description: "Chatwoot configuration updated" });
@@ -476,8 +506,8 @@ function ChatwootConfigCard({ accountId }: { accountId: number }) {
                 type="password"
                 value={apiToken}
                 onChange={(e) => setApiToken(e.target.value)}
-                placeholder="Your Chatwoot API token"
-                required
+                placeholder={config?.configured ? "Already set — leave blank to keep" : "Your Chatwoot API token"}
+                required={!config?.configured}
                 data-testid="input-api-token"
               />
             </div>
@@ -667,6 +697,95 @@ function MessageLogsCard({ accountId }: { accountId: number }) {
   );
 }
 
+interface LogSettings {
+  logEnabled: boolean;
+  retentionMinutes: number;
+}
+
+function LogSettingsCard({ accountId }: { accountId: number }) {
+  const { toast } = useToast();
+
+  const { data: settings, isLoading } = useQuery<LogSettings>({
+    queryKey: [`/api/whatsapp/accounts/${accountId}/log-settings`],
+  });
+
+  const saveMutation = useMutation({
+    mutationFn: async (update: Partial<LogSettings>) => {
+      await apiRequest("POST", `/api/whatsapp/accounts/${accountId}/log-settings`, update);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [`/api/whatsapp/accounts/${accountId}/log-settings`] });
+      toast({ title: "Settings saved" });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Save failed", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const retentionOptions = [
+    { value: "0", label: "Never auto-clear" },
+    { value: "30", label: "30 minutes" },
+    { value: "60", label: "1 hour" },
+    { value: "360", label: "6 hours" },
+    { value: "1440", label: "24 hours" },
+    { value: "10080", label: "7 days" },
+  ];
+
+  if (isLoading) return null;
+
+  const logEnabled = settings?.logEnabled ?? true;
+  const retentionMinutes = settings?.retentionMinutes ?? 0;
+
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle className="text-lg flex items-center gap-2">
+          <Timer className="h-5 w-5" />
+          Log Settings
+        </CardTitle>
+        <CardDescription>Control message &amp; webhook log behaviour</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-sm font-medium">Enable Logging</p>
+            <p className="text-xs text-muted-foreground">Save incoming &amp; outgoing message logs</p>
+          </div>
+          <Switch
+            checked={logEnabled}
+            onCheckedChange={(checked) => saveMutation.mutate({ logEnabled: checked })}
+            disabled={saveMutation.isPending}
+            data-testid="switch-log-enabled"
+          />
+        </div>
+        <Separator />
+        <div className="space-y-2">
+          <Label className="text-sm font-medium">Auto-clear logs after</Label>
+          <Select
+            value={String(retentionMinutes)}
+            onValueChange={(val) => saveMutation.mutate({ retentionMinutes: parseInt(val) })}
+            disabled={saveMutation.isPending}
+          >
+            <SelectTrigger data-testid="select-retention">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {retentionOptions.map((opt) => (
+                <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {retentionMinutes > 0 && (
+            <p className="text-xs text-muted-foreground">
+              Logs older than {retentionOptions.find(o => o.value === String(retentionMinutes))?.label.toLowerCase()} will be deleted automatically.
+            </p>
+          )}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 function AccountDetails({ account, onRefresh }: { account: WhatsAppAccount; onRefresh: () => void }) {
   const { toast } = useToast();
   const [, setLocation] = useLocation();
@@ -785,7 +904,10 @@ function AccountDetails({ account, onRefresh }: { account: WhatsAppAccount; onRe
       )}
 
       {account.status === "connected" && (
-        <MessageLogsCard accountId={account.id} />
+        <div className="grid gap-6 md:grid-cols-2">
+          <MessageLogsCard accountId={account.id} />
+          <LogSettingsCard accountId={account.id} />
+        </div>
       )}
     </div>
   );

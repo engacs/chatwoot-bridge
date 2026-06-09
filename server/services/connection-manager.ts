@@ -23,6 +23,7 @@ interface WhatsAppConnection {
   chatwootService: ChatwootService | null;
   reconnectAttempts: number;
   maxReconnectAttempts: number;
+  token: string; // unique per initializeAccount call — used to detect stale close events
 }
 
 export class ConnectionManager extends EventEmitter {
@@ -76,11 +77,13 @@ export class ConnectionManager extends EventEmitter {
       markOnlineOnConnect: true,
     });
 
+    const connectionToken = `${accountId}-${Date.now()}-${Math.random()}`;
     const connection: WhatsAppConnection = {
       socket,
       chatwootService: null,
       reconnectAttempts: reconnectAttempt,
       maxReconnectAttempts: 5,
+      token: connectionToken,
     };
 
     this.connections.set(accountId, connection);
@@ -112,7 +115,8 @@ export class ConnectionManager extends EventEmitter {
 
       if (conn === "close") {
         const connData = this.connections.get(accountId);
-        if (!connData) return;
+        // If the connection was replaced by a newer initializeAccount call, ignore this stale close event
+        if (!connData || connData.token !== connectionToken) return;
 
         const shouldReconnect =
           (lastDisconnect?.error as Boom)?.output?.statusCode !== DisconnectReason.loggedOut &&
@@ -170,7 +174,7 @@ export class ConnectionManager extends EventEmitter {
       if (type !== "notify") return;
 
       const connData = this.connections.get(accountId);
-      if (!connData) return;
+      if (!connData || connData.token !== connectionToken) return;
 
       for (const msg of messages) {
         if (msg.key.fromMe) continue;
@@ -206,17 +210,20 @@ export class ConnectionManager extends EventEmitter {
 
         console.log(`[ConnectionManager] Account ${accountId} incoming: ${remoteJid} - ${content.substring(0, 50)}`);
 
-        // Always log incoming message regardless of Chatwoot config
-        await storage.addMessageLog({
-          whatsappAccountId: accountId,
-          direction: "incoming",
-          remoteJid,
-          remoteName: pushName,
-          chatwootMessageId: null,
-          whatsappMessageId: msg.key.id || null,
-          content: content.substring(0, 200),
-          status: connData.chatwootService ? "pending" : "no_chatwoot",
-        });
+        const logEnabledSetting = await storage.getSetting(`account_${accountId}_log_enabled`);
+        const logEnabled = logEnabledSetting !== "false";
+        if (logEnabled) {
+          await storage.addMessageLog({
+            whatsappAccountId: accountId,
+            direction: "incoming",
+            remoteJid,
+            remoteName: pushName,
+            chatwootMessageId: null,
+            whatsappMessageId: msg.key.id || null,
+            content: content.substring(0, 200),
+            status: connData.chatwootService ? "pending" : "no_chatwoot",
+          });
+        }
 
         if (!connData.chatwootService) {
           console.log(`[ConnectionManager] Account ${accountId} has no Chatwoot config, message logged only`);

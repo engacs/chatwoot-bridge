@@ -253,11 +253,34 @@ export const storage = new DatabaseStorage();
 export function startCleanupJob() {
   const runCleanup = async () => {
     try {
-      const deletedMessages = await storage.deleteOldMessageLogs(1);
       const deletedWebhooks = await storage.deleteOldWebhookEvents(1);
-      const deletedWebhookLogs = await storage.deleteOldWebhookLogs(1);
-      if (deletedMessages > 0 || deletedWebhooks > 0 || deletedWebhookLogs > 0) {
-        console.log(`[Cleanup] Deleted ${deletedMessages} messages, ${deletedWebhooks} events, ${deletedWebhookLogs} webhook logs`);
+
+      // Per-account retention cleanup
+      const accounts = await db.select({ id: whatsappAccounts.id }).from(whatsappAccounts);
+      let totalMessages = 0;
+      let totalWebhookLogs = 0;
+
+      for (const account of accounts) {
+        const retentionSetting = await storage.getSetting(`account_${account.id}_log_retention_minutes`);
+        const retentionMinutes = retentionSetting ? parseInt(retentionSetting) : 0;
+
+        if (retentionMinutes > 0) {
+          const cutoff = new Date(Date.now() - retentionMinutes * 60 * 1000);
+          const [msgResult, whlResult] = await Promise.all([
+            db.delete(messageLogs).where(
+              and(eq(messageLogs.whatsappAccountId, account.id), lt(messageLogs.createdAt, cutoff))
+            ),
+            db.delete(webhookLogs).where(
+              and(eq(webhookLogs.whatsappAccountId, account.id), lt(webhookLogs.createdAt, cutoff))
+            ),
+          ]);
+          totalMessages += msgResult[0].affectedRows;
+          totalWebhookLogs += whlResult[0].affectedRows;
+        }
+      }
+
+      if (deletedWebhooks > 0 || totalMessages > 0 || totalWebhookLogs > 0) {
+        console.log(`[Cleanup] Deleted ${totalMessages} messages, ${deletedWebhooks} events, ${totalWebhookLogs} webhook logs`);
       }
     } catch (error) {
       console.error("[Cleanup] Error during cleanup:", error);
@@ -265,5 +288,5 @@ export function startCleanupJob() {
   };
 
   runCleanup();
-  setInterval(runCleanup, 60 * 60 * 1000);
+  setInterval(runCleanup, 10 * 60 * 1000); // Check every 10 minutes
 }
