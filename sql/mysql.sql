@@ -1,0 +1,79 @@
+-- WhatsApp–Chatwoot Bridge — MySQL setup
+-- Run this after creating the database and user
+
+CREATE TABLE IF NOT EXISTS users (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  username VARCHAR(255) NOT NULL UNIQUE,
+  email VARCHAR(255) NOT NULL UNIQUE,
+  password VARCHAR(255) NOT NULL,
+  is_admin TINYINT(1) NOT NULL DEFAULT 0,
+  is_enabled TINYINT(1) NOT NULL DEFAULT 1,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS whatsapp_accounts (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  user_id INT NOT NULL,
+  label VARCHAR(255) NOT NULL,
+  phone_number VARCHAR(50),
+  status VARCHAR(50) NOT NULL DEFAULT 'disconnected',
+  qr_code TEXT,
+  session_path VARCHAR(255) NOT NULL,
+  last_connected_at DATETIME,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS chatwoot_configs (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  whatsapp_account_id INT NOT NULL UNIQUE,
+  base_url TEXT NOT NULL,
+  api_token TEXT NOT NULL,
+  inbox_id TEXT NOT NULL,
+  account_id TEXT NOT NULL,
+  webhook_secret TEXT,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS message_logs (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  whatsapp_account_id INT NOT NULL,
+  direction VARCHAR(50) NOT NULL,
+  remote_jid TEXT NOT NULL,
+  remote_name TEXT,
+  content TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending',
+  chatwoot_message_id TEXT,
+  whatsapp_message_id TEXT,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS webhook_logs (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  whatsapp_account_id INT,
+  direction TEXT NOT NULL DEFAULT 'incoming',
+  method TEXT NOT NULL,
+  url TEXT NOT NULL,
+  headers JSON NOT NULL,
+  body JSON NOT NULL,
+  status_code INT,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS webhook_events (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  whatsapp_account_id INT NOT NULL,
+  event_type TEXT NOT NULL,
+  payload JSON NOT NULL,
+  success TINYINT(1) NOT NULL DEFAULT 0,
+  error TEXT,
+  processed_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS app_settings (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  `key` VARCHAR(255) NOT NULL UNIQUE,
+  value TEXT NOT NULL,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
