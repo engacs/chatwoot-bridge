@@ -177,14 +177,45 @@ export class ConnectionManager extends EventEmitter {
       if (!connData || connData.token !== connectionToken) return;
 
       for (const msg of messages) {
-        if (msg.key.fromMe) continue;
         if (!msg.message) continue;
 
         const content = this.extractMessageContent(msg);
         if (!content) continue;
 
+        const isFromMe = msg.key.fromMe === true;
         let remoteJid = msg.key.remoteJid || "";
-        const pushName = msg.pushName || null;
+        const isGroup = remoteJid.endsWith("@g.us");
+
+        // For group messages, the sender is in msg.key.participant (not remoteJid)
+        const senderJid = isGroup
+          ? (msg.key.participant || remoteJid)
+          : remoteJid;
+
+        let pushName = msg.pushName || null;
+
+        // Fetch group metadata to get group name
+        let groupName: string | null = null;
+        if (isGroup) {
+          try {
+            const metadata = await socket.groupMetadata(remoteJid);
+            groupName = metadata.subject || null;
+          } catch {
+            groupName = null;
+          }
+        }
+
+        // Fetch contact profile picture URL
+        let avatarUrl: string | null = null;
+        if (!isFromMe) {
+          try {
+            avatarUrl = await socket.profilePictureUrl(
+              isGroup ? remoteJid : senderJid,
+              "image"
+            );
+          } catch {
+            avatarUrl = null;
+          }
+        }
 
         // Try to resolve LID to phone number
         if (remoteJid.endsWith("@lid")) {
@@ -192,7 +223,6 @@ export class ConnectionManager extends EventEmitter {
             const lidMapping = (socket as any).signalRepository?.lidMapping;
             if (lidMapping?.getPNForLID) {
               let phoneNumber = lidMapping.getPNForLID(remoteJid);
-              // Handle if it returns a Promise
               if (phoneNumber && typeof phoneNumber.then === 'function') {
                 phoneNumber = await phoneNumber;
               }
@@ -208,16 +238,18 @@ export class ConnectionManager extends EventEmitter {
           }
         }
 
-        console.log(`[ConnectionManager] Account ${accountId} incoming: ${remoteJid} - ${content.substring(0, 50)}`);
+        const direction = isFromMe ? "outgoing" : "incoming";
+        const displayName = isGroup ? (groupName || remoteJid) : (pushName || remoteJid);
+        console.log(`[ConnectionManager] Account ${accountId} ${direction} ${isGroup ? "group" : ""}: ${remoteJid} - ${content.substring(0, 50)}`);
 
         const logEnabledSetting = await storage.getSetting(`account_${accountId}_log_enabled`);
         const logEnabled = logEnabledSetting !== "false";
         if (logEnabled) {
           await storage.addMessageLog({
             whatsappAccountId: accountId,
-            direction: "incoming",
+            direction,
             remoteJid,
-            remoteName: pushName,
+            remoteName: isGroup ? groupName : pushName,
             chatwootMessageId: null,
             whatsappMessageId: msg.key.id || null,
             content: content.substring(0, 200),
@@ -226,7 +258,6 @@ export class ConnectionManager extends EventEmitter {
         }
 
         if (!connData.chatwootService) {
-          console.log(`[ConnectionManager] Account ${accountId} has no Chatwoot config, message logged only`);
           continue;
         }
 
@@ -271,7 +302,11 @@ export class ConnectionManager extends EventEmitter {
         try {
           await connData.chatwootService.handleIncomingMessage({
             remoteJid,
-            pushName,
+            senderJid,
+            pushName: isGroup ? pushName : pushName,
+            groupName,
+            avatarUrl,
+            isFromMe,
             content,
             messageId: msg.key.id || undefined,
             media: mediaBuffer ? {

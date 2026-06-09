@@ -142,31 +142,33 @@ export class ChatwootService {
     }
   }
 
-  private async findOrCreateContact(phoneNumber: string, name?: string, avatarUrl?: string): Promise<ChatwootContact | null> {
-    // Remove WhatsApp suffixes and device number (e.g., :0, :1, etc.)
+  private async findOrCreateContact(
+    phoneNumber: string,
+    name?: string,
+    avatarUrl?: string | null
+  ): Promise<ChatwootContact | null> {
     let cleanPhone = phoneNumber
       .replace("@s.whatsapp.net", "")
       .replace("@g.us", "")
-      .replace(/:\d+$/, ""); // Remove device number like :0, :1
-    
-    // Validate if phoneNumber is likely an LID or non-standard format
-    // Chatwoot requires e164 (+123456789)
-    // If it's an LID or doesn't look like a phone number, we'll use it as identifier but might need a fallback for phone_number
+      .replace(/:\d+$/, "");
+
     const isStandardPhone = /^\d{7,15}$/.test(cleanPhone);
 
     const searchResult = await this.apiRequest<{ payload: ChatwootContact[] }>(
       "GET",
-      `/api/v1/accounts/${this.accountId}/contacts/search?q=${cleanPhone}`
+      `/api/v1/accounts/${this.accountId}/contacts/search?q=${encodeURIComponent(cleanPhone)}`
     );
 
     if (searchResult?.payload?.length) {
       const existingContact = searchResult.payload[0];
-      
-      // Update contact name if we have a better name
-      if (name && name !== existingContact.name && !existingContact.name.includes(name)) {
+
+      if (name && name !== existingContact.name) {
         await this.updateContact(existingContact.id, { name });
       }
-      
+      if (avatarUrl) {
+        await this.updateContactAvatar(existingContact.id, avatarUrl);
+      }
+
       return existingContact;
     }
 
@@ -176,7 +178,6 @@ export class ChatwootService {
       identifier: cleanPhone,
     };
 
-    // Only add phone_number if it looks like a real one to avoid Chatwoot 422 errors
     if (isStandardPhone) {
       contactData.phone_number = `+${cleanPhone}`;
     }
@@ -187,7 +188,13 @@ export class ChatwootService {
       contactData
     );
 
-    return createResult?.payload?.contact || null;
+    const contact = createResult?.payload?.contact || null;
+
+    if (contact && avatarUrl) {
+      await this.updateContactAvatar(contact.id, avatarUrl);
+    }
+
+    return contact;
   }
 
   async updateContact(contactId: number, updates: { name?: string; avatar_url?: string }): Promise<void> {
@@ -340,7 +347,11 @@ export class ChatwootService {
 
   async handleIncomingMessage(params: {
     remoteJid: string;
+    senderJid: string;
     pushName: string | null;
+    groupName: string | null;
+    avatarUrl: string | null;
+    isFromMe: boolean;
     content: string;
     messageId?: string;
     media?: {
@@ -350,16 +361,19 @@ export class ChatwootService {
       fileName: string;
     };
   }): Promise<void> {
-    const { remoteJid, pushName, content, messageId, media } = params;
+    const { remoteJid, senderJid, pushName, groupName, avatarUrl, isFromMe, content, messageId, media } = params;
 
     if (messageId && this.processedMessages.has(messageId)) {
       console.log(`[Chatwoot] Message ${messageId} already processed, skipping`);
       return;
     }
 
-    const cleanPhone = remoteJid.replace("@s.whatsapp.net", "").replace("@g.us", "").replace(/:\d+$/, "");
-    
-    const contact = await this.findOrCreateContact(cleanPhone, pushName || undefined);
+    const isGroup = remoteJid.endsWith("@g.us");
+
+    // For groups: contact = the group itself. For DMs: contact = the person.
+    const contactJid = isGroup ? remoteJid : senderJid;
+    const contactName = isGroup ? (groupName || remoteJid) : (pushName || undefined);
+    const contact = await this.findOrCreateContact(contactJid, contactName, avatarUrl);
     if (!contact) {
       console.error("[Chatwoot] Failed to create/find contact");
       return;
@@ -371,23 +385,27 @@ export class ChatwootService {
       return;
     }
 
+    // For group messages, prefix the sender's name so agents know who wrote it.
+    // For fromMe messages, mark as outgoing private note so agents can see phone replies.
+    const senderName = pushName || senderJid.replace("@s.whatsapp.net", "");
+    const finalContent = isGroup && !isFromMe
+      ? `*${senderName}:* ${content}`
+      : content;
+
+    const messageType = isFromMe ? "outgoing" : "incoming";
+
     let messageResult: { id: number } | null = null;
 
-    if (media) {
-      // Use multipart form data for media messages
-      messageResult = await this.sendMessageWithAttachment(
-        conversation.id,
-        content,
-        media
-      );
+    if (media && !isFromMe) {
+      messageResult = await this.sendMessageWithAttachment(conversation.id, finalContent, media);
     } else {
       messageResult = await this.apiRequest<{ id: number }>(
         "POST",
         `/api/v1/accounts/${this.accountId}/conversations/${conversation.id}/messages`,
         {
-          content,
-          message_type: "incoming",
-          private: false,
+          content: finalContent,
+          message_type: messageType,
+          private: isFromMe, // phone-sent messages appear as private notes
         }
       );
     }
@@ -408,9 +426,9 @@ export class ChatwootService {
 
     await storage.addMessageLog({
       whatsappAccountId: this.whatsappAccountId,
-      direction: "incoming",
+      direction: isFromMe ? "outgoing" : "incoming",
       remoteJid,
-      remoteName: pushName,
+      remoteName: isGroup ? groupName : pushName,
       chatwootMessageId: String(messageResult.id),
       whatsappMessageId: messageId || null,
       content: content.substring(0, 200),
