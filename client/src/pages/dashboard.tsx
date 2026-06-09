@@ -786,6 +786,119 @@ function LogSettingsCard({ accountId }: { accountId: number }) {
   );
 }
 
+function WhatsappWebhookCard({ accountId }: { accountId: number }) {
+  const { toast } = useToast();
+  const [showForm, setShowForm] = useState(false);
+  const [webhookUrl, setWebhookUrl] = useState("");
+  const [webhookSecret, setWebhookSecret] = useState("");
+
+  const { data: config, refetch } = useQuery<{ webhookUrl: string; hasSecret: boolean }>({
+    queryKey: [`/api/whatsapp/accounts/${accountId}/whatsapp-webhook`],
+  });
+
+  useEffect(() => {
+    if (config) setWebhookUrl(config.webhookUrl || "");
+  }, [config]);
+
+  const saveMutation = useMutation({
+    mutationFn: async () => {
+      const payload: Record<string, string> = { webhookUrl };
+      if (webhookSecret) payload.webhookSecret = webhookSecret;
+      await apiRequest("POST", `/api/whatsapp/accounts/${accountId}/whatsapp-webhook`, payload);
+    },
+    onSuccess: () => {
+      toast({ title: "Saved", description: "Webhook configuration updated" });
+      setWebhookSecret("");
+      setShowForm(false);
+      refetch();
+    },
+    onError: (error: Error) => {
+      toast({ title: "Save failed", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const events = [
+    { name: "messages.upsert", desc: "New / updated messages" },
+    { name: "messages.update", desc: "Read receipts & delivery status" },
+    { name: "messages.delete", desc: "Deleted messages" },
+    { name: "messages.reaction", desc: "Emoji reactions" },
+    { name: "blocklist.update", desc: "Block / unblock events" },
+  ];
+
+  return (
+    <Card>
+      <CardHeader className="flex flex-row items-center justify-between gap-2 pb-2">
+        <div>
+          <CardTitle className="text-lg flex items-center gap-2">
+            <Webhook className="h-5 w-5" />
+            WhatsApp Webhook
+          </CardTitle>
+          <CardDescription>Forward WhatsApp events to an external URL</CardDescription>
+        </div>
+        <Badge variant={config?.webhookUrl ? "default" : "outline"}>
+          {config?.webhookUrl ? "Active" : "Not set"}
+        </Badge>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {showForm ? (
+          <form onSubmit={(e) => { e.preventDefault(); saveMutation.mutate(); }} className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="outWebhookUrl">Webhook URL</Label>
+              <Input
+                id="outWebhookUrl"
+                value={webhookUrl}
+                onChange={(e) => setWebhookUrl(e.target.value)}
+                placeholder="https://your-server/webhook"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="outWebhookSecret">Webhook Secret (optional)</Label>
+              <Input
+                id="outWebhookSecret"
+                type="password"
+                value={webhookSecret}
+                onChange={(e) => setWebhookSecret(e.target.value)}
+                placeholder={config?.hasSecret ? "Already set — leave blank to keep" : "HMAC-SHA256 signing secret"}
+              />
+              {config?.hasSecret && (
+                <p className="text-xs text-muted-foreground">Requests are signed with <code>x-webhook-signature</code></p>
+              )}
+            </div>
+            <div className="flex gap-2">
+              <Button type="submit" disabled={saveMutation.isPending} size="sm">
+                {saveMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                Save
+              </Button>
+              <Button type="button" variant="outline" size="sm" onClick={() => setShowForm(false)}>Cancel</Button>
+            </div>
+          </form>
+        ) : (
+          <div className="space-y-3">
+            {config?.webhookUrl && (
+              <div className="text-sm">
+                <span className="text-muted-foreground">URL: </span>
+                <code className="text-xs bg-muted px-1 py-0.5 rounded break-all">{config.webhookUrl}</code>
+              </div>
+            )}
+            <div className="space-y-1">
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Events forwarded</p>
+              {events.map(e => (
+                <div key={e.name} className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <code className="bg-muted px-1 py-0.5 rounded text-foreground">{e.name}</code>
+                  <span>{e.desc}</span>
+                </div>
+              ))}
+            </div>
+            <Button variant="outline" size="sm" onClick={() => setShowForm(true)}>
+              {config?.webhookUrl ? "Update Webhook" : "Configure Webhook"}
+            </Button>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 function AccountDetails({ account, onRefresh }: { account: WhatsAppAccount; onRefresh: () => void }) {
   const { toast } = useToast();
   const [, setLocation] = useLocation();
@@ -908,6 +1021,10 @@ function AccountDetails({ account, onRefresh }: { account: WhatsAppAccount; onRe
           <MessageLogsCard accountId={account.id} />
           <LogSettingsCard accountId={account.id} />
         </div>
+      )}
+
+      {account.status === "connected" && (
+        <WhatsappWebhookCard accountId={account.id} />
       )}
     </div>
   );

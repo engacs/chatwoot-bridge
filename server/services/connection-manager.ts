@@ -1,6 +1,6 @@
 import { EventEmitter } from "events";
-import makeWASocket, { 
-  DisconnectReason, 
+import makeWASocket, {
+  DisconnectReason,
   useMultiFileAuthState,
   makeCacheableSignalKeyStore,
   WASocket,
@@ -12,6 +12,7 @@ import QRCode from "qrcode";
 import pino from "pino";
 import path from "path";
 import fs from "fs/promises";
+import crypto from "crypto";
 import { storage } from "../storage";
 import type { WhatsappAccount, ChatwootConfig } from "@shared/schema";
 import { ChatwootService } from "./chatwoot";
@@ -321,6 +322,52 @@ export class ConnectionManager extends EventEmitter {
         }
       }
     });
+
+    // ── Outgoing webhook event listeners ──────────────────────────────────────
+
+    socket.ev.on("messages.update", async (updates) => {
+      const connData = this.connections.get(accountId);
+      if (!connData || connData.token !== connectionToken) return;
+      await this.dispatchWebhook(accountId, { event: "messages.update", accountId, data: updates });
+    });
+
+    socket.ev.on("messages.delete" as any, async (item: any) => {
+      const connData = this.connections.get(accountId);
+      if (!connData || connData.token !== connectionToken) return;
+      await this.dispatchWebhook(accountId, { event: "messages.delete", accountId, data: item });
+    });
+
+    socket.ev.on("messages.reaction" as any, async (reactions: any) => {
+      const connData = this.connections.get(accountId);
+      if (!connData || connData.token !== connectionToken) return;
+      await this.dispatchWebhook(accountId, { event: "messages.reaction", accountId, data: reactions });
+    });
+
+    socket.ev.on("blocklist.update" as any, async (update: any) => {
+      const connData = this.connections.get(accountId);
+      if (!connData || connData.token !== connectionToken) return;
+      await this.dispatchWebhook(accountId, { event: "blocklist.update", accountId, data: update });
+    });
+  }
+
+  private async dispatchWebhook(accountId: number, payload: object): Promise<void> {
+    try {
+      const webhookUrl = await storage.getSetting(`account_${accountId}_out_webhook_url`);
+      if (!webhookUrl) return;
+
+      const body = JSON.stringify(payload);
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+
+      const secret = await storage.getSetting(`account_${accountId}_out_webhook_secret`);
+      if (secret) {
+        const sig = crypto.createHmac("sha256", secret).update(body).digest("hex");
+        headers["x-webhook-signature"] = sig;
+      }
+
+      await fetch(webhookUrl, { method: "POST", headers, body });
+    } catch (err) {
+      console.error(`[ConnectionManager] Outgoing webhook dispatch failed for account ${accountId}:`, err);
+    }
   }
 
   async disconnectAccount(accountId: number, clearSession: boolean = false): Promise<void> {
@@ -442,6 +489,20 @@ export class ConnectionManager extends EventEmitter {
       console.error(`[ConnectionManager] Failed to send media for account ${accountId}:`, error);
       throw error;
     }
+  }
+
+  async fetchBlocklist(accountId: number): Promise<string[]> {
+    const connData = this.connections.get(accountId);
+    if (!connData?.socket) throw new Error(`Account ${accountId} not connected`);
+    const list = await (connData.socket as any).fetchBlocklist();
+    return Array.isArray(list) ? list : [];
+  }
+
+  async updateBlockStatus(accountId: number, phoneNumber: string, action: "block" | "unblock"): Promise<void> {
+    const connData = this.connections.get(accountId);
+    if (!connData?.socket) throw new Error(`Account ${accountId} not connected`);
+    const jid = phoneNumber.includes("@") ? phoneNumber : `${phoneNumber}@s.whatsapp.net`;
+    await (connData.socket as any).updateBlockStatus(jid, action);
   }
 
   getConnection(accountId: number): WhatsAppConnection | undefined {

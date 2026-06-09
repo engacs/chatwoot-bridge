@@ -594,6 +594,90 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     }
   });
 
+  // ========== OUTGOING WEBHOOK CONFIG ==========
+
+  app.get("/api/whatsapp/accounts/:id/whatsapp-webhook", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const accountId = parseInt(req.params.id);
+      const account = await storage.getWhatsappAccount(accountId);
+      if (!account) return res.status(404).json({ error: "Account not found" });
+      if (account.userId !== req.user!.id && !req.user!.isAdmin) return res.status(403).json({ error: "Access denied" });
+
+      const webhookUrl = await storage.getSetting(`account_${accountId}_out_webhook_url`);
+      const hasSecret = !!(await storage.getSetting(`account_${accountId}_out_webhook_secret`));
+
+      res.json({ webhookUrl: webhookUrl || "", hasSecret });
+    } catch (error) {
+      console.error("[API] Error getting whatsapp webhook config:", error);
+      res.status(500).json({ error: "Failed to get config" });
+    }
+  });
+
+  app.post("/api/whatsapp/accounts/:id/whatsapp-webhook", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const accountId = parseInt(req.params.id);
+      const account = await storage.getWhatsappAccount(accountId);
+      if (!account) return res.status(404).json({ error: "Account not found" });
+      if (account.userId !== req.user!.id && !req.user!.isAdmin) return res.status(403).json({ error: "Access denied" });
+
+      const { webhookUrl, webhookSecret } = req.body;
+
+      if (webhookUrl !== undefined) {
+        if (webhookUrl) {
+          await storage.setSetting(`account_${accountId}_out_webhook_url`, webhookUrl);
+        } else {
+          // empty string = delete
+          await storage.setSetting(`account_${accountId}_out_webhook_url`, "");
+        }
+      }
+      if (webhookSecret) {
+        await storage.setSetting(`account_${accountId}_out_webhook_secret`, webhookSecret);
+      }
+
+      res.json({ success: true });
+    } catch (error) {
+      console.error("[API] Error saving whatsapp webhook config:", error);
+      res.status(500).json({ error: "Failed to save config" });
+    }
+  });
+
+  // ========== BLOCKLIST ROUTES ==========
+
+  app.get("/api/whatsapp/accounts/:id/blocklist", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const accountId = parseInt(req.params.id);
+      const account = await storage.getWhatsappAccount(accountId);
+      if (!account) return res.status(404).json({ error: "Account not found" });
+      if (account.userId !== req.user!.id && !req.user!.isAdmin) return res.status(403).json({ error: "Access denied" });
+
+      const list = await connectionManager.fetchBlocklist(accountId);
+      res.json({ blocklist: list });
+    } catch (error: any) {
+      console.error("[API] Error fetching blocklist:", error);
+      res.status(500).json({ error: error.message || "Failed to fetch blocklist" });
+    }
+  });
+
+  app.post("/api/whatsapp/accounts/:id/block", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const accountId = parseInt(req.params.id);
+      const account = await storage.getWhatsappAccount(accountId);
+      if (!account) return res.status(404).json({ error: "Account not found" });
+      if (account.userId !== req.user!.id && !req.user!.isAdmin) return res.status(403).json({ error: "Access denied" });
+
+      const { phoneNumber, action } = req.body;
+      if (!phoneNumber || !["block", "unblock"].includes(action)) {
+        return res.status(400).json({ error: "phoneNumber and action (block|unblock) are required" });
+      }
+
+      await connectionManager.updateBlockStatus(accountId, phoneNumber, action);
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error("[API] Error updating block status:", error);
+      res.status(500).json({ error: error.message || "Failed to update block status" });
+    }
+  });
+
   // ========== LOG SETTINGS ROUTES ==========
 
   app.get("/api/whatsapp/accounts/:id/log-settings", requireAuth, async (req: Request, res: Response) => {
