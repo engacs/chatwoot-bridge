@@ -437,6 +437,8 @@ export class ChatwootService {
     if (messageId) {
       this.processedMessages.add(messageId);
     }
+    // Mark the Chatwoot message ID so the outgoing webhook doesn't re-send it to WhatsApp
+    this.processedMessages.add(`outgoing_${messageResult.id}`);
 
     if (this.processedMessages.size > 10000) {
       const entries = Array.from(this.processedMessages);
