@@ -1,5 +1,5 @@
 import { relations } from "drizzle-orm";
-import { pgTable, text, varchar, timestamp, json, serial, boolean } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, timestamp, json, serial, boolean, integer } from "drizzle-orm/pg-core";
 
 export const users = pgTable("users", {
   id: serial("id").primaryKey(),
@@ -50,6 +50,7 @@ export const messageLogs = pgTable("message_logs", {
   remoteJid: text("remote_jid").notNull(),
   remoteName: text("remote_name"),
   chatwootMessageId: text("chatwoot_message_id"),
+  chatwootConversationId: integer("chatwoot_conversation_id"),
   whatsappMessageId: text("whatsapp_message_id"),
   content: text("content").notNull(),
   status: text("status").notNull().default("pending"),

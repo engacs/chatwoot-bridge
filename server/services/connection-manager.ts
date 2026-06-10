@@ -267,7 +267,6 @@ export class ConnectionManager extends EventEmitter {
         }
 
         const direction = isFromMe ? "outgoing" : "incoming";
-        const displayName = isGroup ? (groupName || remoteJid) : (pushName || remoteJid);
         console.log(`[ConnectionManager] Account ${accountId} ${direction} ${isGroup ? "group" : ""}: ${remoteJid} - ${content.substring(0, 50)}`);
 
         const logEnabledSetting = await storage.getSetting(`account_${accountId}_log_enabled`);
@@ -279,6 +278,7 @@ export class ConnectionManager extends EventEmitter {
             remoteJid,
             remoteName: isGroup ? groupName : pushName,
             chatwootMessageId: null,
+            chatwootConversationId: null,
             whatsappMessageId: msg.key.id || null,
             content: content.substring(0, 200),
             status: connData.chatwootService ? "pending" : "no_chatwoot",
@@ -355,6 +355,33 @@ export class ConnectionManager extends EventEmitter {
     socket.ev.on("messages.update", async (updates) => {
       const connData = this.connections.get(accountId);
       if (!connData || connData.token !== connectionToken) return;
+
+      // Sync delivery/read status back to Chatwoot
+      for (const { key, update } of updates) {
+        if (!key.fromMe || !key.id || update.status === undefined) continue;
+
+        // proto.WebMessageInfo.Status: DELIVERY_ACK=3, READ=4
+        const status = update.status === 4 ? "read" : update.status === 3 ? "delivered" : null;
+        if (!status) continue;
+
+        try {
+          const log = await storage.getMessageByWhatsAppId(accountId, key.id);
+          if (!log?.chatwootMessageId) continue;
+
+          await storage.updateMessageLogStatus(log.id, status);
+
+          if (connData.chatwootService && log.chatwootConversationId && log.chatwootMessageId) {
+            await connData.chatwootService.updateMessageDeliveryStatus(
+              log.chatwootConversationId,
+              log.chatwootMessageId,
+              status
+            );
+          }
+        } catch (err) {
+          console.error(`[ConnectionManager] Failed to sync delivery status for ${key.id}:`, err);
+        }
+      }
+
       await this.dispatchWebhook(accountId, { event: "messages.update", accountId, data: updates });
     });
 

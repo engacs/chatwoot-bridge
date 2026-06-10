@@ -86,6 +86,7 @@ export const messageLogs = mysqlTable("message_logs", {
   remoteJid: text("remote_jid").notNull(),
   remoteName: text("remote_name"),
   chatwootMessageId: text("chatwoot_message_id"),
+  chatwootConversationId: int("chatwoot_conversation_id"),
   whatsappMessageId: text("whatsapp_message_id"),
   content: text("content").notNull(),
   status: text("status").notNull().default("pending"),

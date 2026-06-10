@@ -45,6 +45,7 @@ CREATE TABLE IF NOT EXISTS message_logs (
   content TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'pending',
   chatwoot_message_id TEXT,
+  chatwoot_conversation_id INT,
   whatsapp_message_id TEXT,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );

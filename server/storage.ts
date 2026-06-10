@@ -206,6 +206,10 @@ class DatabaseStorage implements IStorage {
     return log || undefined;
   }
 
+  async updateMessageLogStatus(id: number, status: string): Promise<void> {
+    await db.update(messageLogs).set({ status }).where(eq(messageLogs.id, id));
+  }
+
   async getMessageByChatwootId(whatsappAccountId: number, chatwootId: string): Promise<MessageLog | undefined> {
     const [log] = await db.select().from(messageLogs).where(
       and(eq(messageLogs.whatsappAccountId, whatsappAccountId), eq(messageLogs.chatwootMessageId, chatwootId))

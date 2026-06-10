@@ -199,6 +199,23 @@ export class ChatwootService {
     return contact;
   }
 
+  async updateMessageDeliveryStatus(
+    conversationId: number,
+    chatwootMessageId: string,
+    status: "delivered" | "read"
+  ): Promise<void> {
+    try {
+      await this.apiRequest(
+        "PATCH",
+        `/api/v1/accounts/${this.accountId}/conversations/${conversationId}/messages/${chatwootMessageId}`,
+        { content_attributes: { status } }
+      );
+      console.log(`[Chatwoot] Updated message ${chatwootMessageId} status → ${status}`);
+    } catch (error) {
+      console.error(`[Chatwoot] Failed to update message status:`, error);
+    }
+  }
+
   async updateContact(contactId: number, updates: { name?: string; avatar_url?: string }): Promise<void> {
     try {
       await this.apiRequest(
@@ -430,6 +447,7 @@ export class ChatwootService {
       remoteJid,
       remoteName: isGroup ? groupName : pushName,
       chatwootMessageId: String(messageResult.id),
+      chatwootConversationId: conversation.id,
       whatsappMessageId: messageId || null,
       content: content.substring(0, 200),
       status: "delivered",
@@ -578,6 +596,7 @@ export class ChatwootService {
       remoteJid: `${phoneNumber}@s.whatsapp.net`,
       remoteName: null,
       chatwootMessageId: chatwootMessageId || null,
+      chatwootConversationId: null,
       whatsappMessageId,
       content: content.substring(0, 200),
       status,
