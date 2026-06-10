@@ -443,7 +443,7 @@ export class ChatwootService {
       this.processedMessages = new Set(entries.slice(-5000));
     }
 
-    await storage.addMessageLog({
+    storage.addMessageLog({
       whatsappAccountId: this.whatsappAccountId,
       direction: isFromMe ? "outgoing" : "incoming",
       remoteJid,
@@ -453,7 +453,7 @@ export class ChatwootService {
       whatsappMessageId: messageId || null,
       content: content.substring(0, 200),
       status: "delivered",
-    });
+    }).catch((err) => console.error("[Chatwoot] Failed to save message log:", err));
 
     console.log(`[Chatwoot] Message sent to conversation ${conversation.id}`);
   }
@@ -592,7 +592,7 @@ export class ChatwootService {
     status: "sent" | "failed",
     chatwootMessageId?: string | null
   ): Promise<void> {
-    await storage.addMessageLog({
+    storage.addMessageLog({
       whatsappAccountId: this.whatsappAccountId,
       direction: "outgoing",
       remoteJid: `${phoneNumber}@s.whatsapp.net`,
@@ -602,6 +602,6 @@ export class ChatwootService {
       whatsappMessageId,
       content: content.substring(0, 200),
       status,
-    });
+    }).catch((err) => console.error("[Chatwoot] Failed to save outgoing log:", err));
   }
 }
