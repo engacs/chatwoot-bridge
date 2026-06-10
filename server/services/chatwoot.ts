@@ -402,12 +402,14 @@ export class ChatwootService {
       return;
     }
 
-    // For group messages, prefix the sender's name so agents know who wrote it.
-    // For fromMe messages, mark as outgoing private note so agents can see phone replies.
+    // For group messages, prefix sender name. For fromMe, prefix "📱 From mobile:" so agents know it was sent from the phone.
     const senderName = pushName || senderJid.replace("@s.whatsapp.net", "");
-    const finalContent = isGroup && !isFromMe
-      ? `*${senderName}:* ${content}`
-      : content;
+    let finalContent = content;
+    if (isGroup && !isFromMe) {
+      finalContent = `*${senderName}:* ${content}`;
+    } else if (isFromMe) {
+      finalContent = `📱 *From mobile:* ${content}`;
+    }
 
     const messageType = isFromMe ? "outgoing" : "incoming";
 
@@ -422,7 +424,7 @@ export class ChatwootService {
         {
           content: finalContent,
           message_type: messageType,
-          private: isFromMe, // phone-sent messages appear as private notes
+          private: false,
         }
       );
     }
