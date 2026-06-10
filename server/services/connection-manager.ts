@@ -194,25 +194,31 @@ export class ConnectionManager extends EventEmitter {
 
         let pushName = msg.pushName || null;
 
+        const syncAvatarSetting = await storage.getSetting(`account_${accountId}_sync_avatar`);
+        const syncAvatar = syncAvatarSetting !== "false";
+
         // Fetch group metadata to get group name
         let groupName: string | null = null;
-        if (isGroup) {
+        if (isGroup && syncAvatar) {
           try {
-            const metadata = await socket.groupMetadata(remoteJid);
-            groupName = metadata.subject || null;
+            const metadata = await Promise.race([
+              socket.groupMetadata(remoteJid),
+              new Promise<null>((resolve) => setTimeout(() => resolve(null), 3000)),
+            ]);
+            groupName = metadata?.subject || null;
           } catch {
             groupName = null;
           }
         }
 
-        // Fetch contact profile picture URL
+        // Fetch contact profile picture URL (2s timeout — slow WA response should not block message delivery)
         let avatarUrl: string | null = null;
-        if (!isFromMe) {
+        if (!isFromMe && syncAvatar) {
           try {
-            avatarUrl = await socket.profilePictureUrl(
-              isGroup ? remoteJid : senderJid,
-              "image"
-            );
+            avatarUrl = await Promise.race([
+              socket.profilePictureUrl(isGroup ? remoteJid : senderJid, "image").then((u) => u ?? null),
+              new Promise<null>((resolve) => setTimeout(() => resolve(null), 2000)),
+            ]);
           } catch {
             avatarUrl = null;
           }

@@ -595,6 +595,7 @@ function MessageLogsCard({ accountId }: { accountId: number }) {
 interface LogSettings {
   logEnabled: boolean;
   retentionMinutes: number;
+  syncAvatar: boolean;
 }
 
 function LogSettingsCard({ accountId }: { accountId: number }) {
@@ -630,6 +631,7 @@ function LogSettingsCard({ accountId }: { accountId: number }) {
 
   const logEnabled = settings?.logEnabled ?? true;
   const retentionMinutes = settings?.retentionMinutes ?? 0;
+  const syncAvatar = settings?.syncAvatar ?? true;
 
   return (
     <Card className="border-gray-100 shadow-none">
@@ -645,6 +647,18 @@ function LogSettingsCard({ accountId }: { accountId: number }) {
           <Switch
             checked={logEnabled}
             onCheckedChange={(checked) => saveMutation.mutate({ logEnabled: checked })}
+            disabled={saveMutation.isPending}
+          />
+        </div>
+        <Separator className="bg-gray-50" />
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-sm text-gray-700">Sync profile picture</p>
+            <p className="text-xs text-gray-400">Fetch contact avatar on each message</p>
+          </div>
+          <Switch
+            checked={syncAvatar}
+            onCheckedChange={(checked) => saveMutation.mutate({ syncAvatar: checked })}
             disabled={saveMutation.isPending}
           />
         </div>

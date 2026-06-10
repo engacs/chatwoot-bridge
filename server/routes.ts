@@ -780,10 +780,12 @@ export async function registerRoutes(httpServer: Server, app: Express) {
 
       const logEnabled = await storage.getSetting(`account_${accountId}_log_enabled`);
       const retentionMinutes = await storage.getSetting(`account_${accountId}_log_retention_minutes`);
+      const syncAvatar = await storage.getSetting(`account_${accountId}_sync_avatar`);
 
       res.json({
         logEnabled: logEnabled !== "false",
         retentionMinutes: retentionMinutes ? parseInt(retentionMinutes) : 0,
+        syncAvatar: syncAvatar !== "false",
       });
     } catch (error) {
       console.error("[API] Error getting log settings:", error);
@@ -798,13 +800,16 @@ export async function registerRoutes(httpServer: Server, app: Express) {
       if (!account) return res.status(404).json({ error: "Account not found" });
       if (account.userId !== req.user!.id && !req.user!.isAdmin) return res.status(403).json({ error: "Access denied" });
 
-      const { logEnabled, retentionMinutes } = req.body;
+      const { logEnabled, retentionMinutes, syncAvatar } = req.body;
 
       if (typeof logEnabled === "boolean") {
         await storage.setSetting(`account_${accountId}_log_enabled`, logEnabled.toString());
       }
       if (typeof retentionMinutes === "number") {
         await storage.setSetting(`account_${accountId}_log_retention_minutes`, retentionMinutes.toString());
+      }
+      if (typeof syncAvatar === "boolean") {
+        await storage.setSetting(`account_${accountId}_sync_avatar`, syncAvatar.toString());
       }
 
       res.json({ success: true });
