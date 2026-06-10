@@ -1128,8 +1128,8 @@ export async function registerRoutes(httpServer: Server, app: Express) {
         statusCode: 200,
       });
 
-      // Process the webhook
-      const chatwootService = new ChatwootService(chatwootConfig, accountId);
+      // Reuse the existing ChatwootService instance so processedMessages dedup works correctly
+      const chatwootService = connectionManager.getChatwootService(accountId) ?? new ChatwootService(chatwootConfig, accountId);
       const result = await chatwootService.processWebhook(parseResult.data);
       const chatwootMsgId = parseResult.data.id ? String(parseResult.data.id) : null;
 

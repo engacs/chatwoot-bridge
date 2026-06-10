@@ -424,6 +424,10 @@ export class ConnectionManager extends EventEmitter {
     }
   }
 
+  getChatwootService(accountId: number): ChatwootService | null {
+    return this.connections.get(accountId)?.chatwootService ?? null;
+  }
+
   async disconnectAccount(accountId: number, clearSession: boolean = false): Promise<void> {
     const connData = this.connections.get(accountId);
     if (connData?.socket) {
