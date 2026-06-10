@@ -29,6 +29,7 @@ interface WhatsAppConnection {
 
 export class ConnectionManager extends EventEmitter {
   private connections: Map<number, WhatsAppConnection> = new Map();
+  private lidToPhone: Map<string, string> = new Map(); // LID JID → phone JID
   private static instance: ConnectionManager;
 
   private constructor() {
@@ -163,11 +164,20 @@ export class ConnectionManager extends EventEmitter {
       }
     });
 
-    // Listen for LID to phone number mappings
-    socket.ev.on("lid-mapping.update" as any, (mapping: Array<{ lid: string; pn: string }>) => {
-      console.log(`[ConnectionManager] Account ${accountId} received LID mappings:`, mapping.length);
-      for (const { lid, pn } of mapping) {
-        console.log(`[ConnectionManager] LID mapping: ${lid} -> ${pn}`);
+    // Build LID → phone map from contacts events
+    socket.ev.on("contacts.upsert", (contacts) => {
+      for (const contact of contacts) {
+        if (contact.id && (contact as any).lid) {
+          this.lidToPhone.set((contact as any).lid, contact.id);
+        }
+      }
+    });
+
+    socket.ev.on("contacts.update", (updates) => {
+      for (const update of updates) {
+        if (update.id && (update as any).lid) {
+          this.lidToPhone.set((update as any).lid, update.id);
+        }
       }
     });
 
@@ -225,25 +235,34 @@ export class ConnectionManager extends EventEmitter {
           }
         }
 
-        // Try to resolve LID to phone number
+        // Try to resolve LID to real phone JID
         if (remoteJid.endsWith("@lid")) {
-          try {
-            const lidMapping = (socket as any).signalRepository?.lidMapping;
-            if (lidMapping?.getPNForLID) {
-              let phoneNumber = lidMapping.getPNForLID(remoteJid);
-              if (phoneNumber && typeof phoneNumber.then === 'function') {
-                phoneNumber = await phoneNumber;
+          const mapped = this.lidToPhone.get(remoteJid);
+          if (mapped) {
+            console.log(`[ConnectionManager] Resolved LID ${remoteJid} to ${mapped} (contacts map)`);
+            remoteJid = mapped;
+            if (!isGroup) senderJid = mapped;
+          } else {
+            // Fallback: try Baileys internal signal repository
+            try {
+              const lidMapping = (socket as any).signalRepository?.lidMapping;
+              if (lidMapping?.getPNForLID) {
+                let phoneNumber = lidMapping.getPNForLID(remoteJid);
+                if (phoneNumber && typeof phoneNumber.then === "function") {
+                  phoneNumber = await phoneNumber;
+                }
+                if (phoneNumber && typeof phoneNumber === "string") {
+                  console.log(`[ConnectionManager] Resolved LID ${remoteJid} to ${phoneNumber} (signal repo)`);
+                  this.lidToPhone.set(remoteJid, phoneNumber);
+                  remoteJid = phoneNumber;
+                  if (!isGroup) senderJid = phoneNumber;
+                } else {
+                  console.log(`[ConnectionManager] Could not resolve LID ${remoteJid} - no mapping yet`);
+                }
               }
-              if (phoneNumber && typeof phoneNumber === 'string') {
-                console.log(`[ConnectionManager] Resolved LID ${remoteJid} to ${phoneNumber}`);
-                remoteJid = phoneNumber;
-                if (!isGroup) senderJid = phoneNumber;
-              } else {
-                console.log(`[ConnectionManager] Could not resolve LID ${remoteJid} - no mapping available yet`);
-              }
+            } catch (err) {
+              console.log(`[ConnectionManager] LID resolution not available: ${err}`);
             }
-          } catch (err) {
-            console.log(`[ConnectionManager] LID resolution not available: ${err}`);
           }
         }
 
