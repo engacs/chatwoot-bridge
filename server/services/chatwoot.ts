@@ -408,7 +408,7 @@ export class ChatwootService {
     if (isGroup && !isFromMe) {
       finalContent = `*${senderName}:* ${content}`;
     } else if (isFromMe) {
-      finalContent = `${content} \n📱 <i>From mobile</i>`;
+      finalContent = `${content} \n📱 From mobile`;
     }
 
     // fromMe messages are posted as private notes — this guarantees the webhook's own
