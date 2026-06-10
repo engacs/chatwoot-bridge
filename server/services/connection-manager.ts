@@ -190,6 +190,14 @@ export class ConnectionManager extends EventEmitter {
       for (const msg of messages) {
         if (!msg.message) continue;
 
+        // Unwrap view-once messages so media download and content extraction work normally
+        const viewOnceInner = msg.message.viewOnceMessage?.message
+          || msg.message.viewOnceMessageV2?.message
+          || (msg.message as any).viewOnceMessageV2Extension?.message;
+        if (viewOnceInner) {
+          msg.message = viewOnceInner;
+        }
+
         const content = this.extractMessageContent(msg);
         if (!content) continue;
 
@@ -684,7 +692,7 @@ export class ConnectionManager extends EventEmitter {
       return `[Document] ${message.documentMessage.fileName || "file"}`;
     }
     if (message.audioMessage) {
-      return "[Audio]";
+      return (message.audioMessage as any).ptt ? "[Voice Note]" : "[Audio]";
     }
     if (message.stickerMessage) {
       return "[Sticker]";
