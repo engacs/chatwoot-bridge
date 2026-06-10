@@ -22,6 +22,7 @@ if (dbType === "mysql") {
     user: url.username,
     password: url.password,
     database: url.pathname.slice(1),
+    charset: "utf8mb4",
   });
 
   _db = drizzle(pool, { schema, mode: "default" });

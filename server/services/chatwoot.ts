@@ -408,7 +408,7 @@ export class ChatwootService {
     if (isGroup && !isFromMe) {
       finalContent = `*${senderName}:* ${content}`;
     } else if (isFromMe) {
-      finalContent = `📱 *From mobile:* ${content}`;
+      finalContent = `[Mobile] ${content}`;
     }
 
     const messageType = isFromMe ? "outgoing" : "incoming";
