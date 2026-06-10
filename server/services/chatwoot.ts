@@ -150,6 +150,7 @@ export class ChatwootService {
     let cleanPhone = phoneNumber
       .replace("@s.whatsapp.net", "")
       .replace("@g.us", "")
+      .replace("@lid", "")
       .replace(/:\d+$/, "");
 
     const isStandardPhone = /^\d{7,15}$/.test(cleanPhone);

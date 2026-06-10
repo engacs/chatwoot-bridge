@@ -187,8 +187,9 @@ export class ConnectionManager extends EventEmitter {
         let remoteJid = msg.key.remoteJid || "";
         const isGroup = remoteJid.endsWith("@g.us");
 
-        // For group messages, the sender is in msg.key.participant (not remoteJid)
-        const senderJid = isGroup
+        // For group messages, the sender is in msg.key.participant (not remoteJid).
+        // For DMs, senderJid is derived after LID resolution below.
+        let senderJid = isGroup
           ? (msg.key.participant || remoteJid)
           : remoteJid;
 
@@ -236,6 +237,7 @@ export class ConnectionManager extends EventEmitter {
               if (phoneNumber && typeof phoneNumber === 'string') {
                 console.log(`[ConnectionManager] Resolved LID ${remoteJid} to ${phoneNumber}`);
                 remoteJid = phoneNumber;
+                if (!isGroup) senderJid = phoneNumber;
               } else {
                 console.log(`[ConnectionManager] Could not resolve LID ${remoteJid} - no mapping available yet`);
               }
