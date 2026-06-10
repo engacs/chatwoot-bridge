@@ -272,7 +272,7 @@ export class ConnectionManager extends EventEmitter {
         const logEnabledSetting = await storage.getSetting(`account_${accountId}_log_enabled`);
         const logEnabled = logEnabledSetting !== "false";
         if (logEnabled) {
-          await storage.addMessageLog({
+          storage.addMessageLog({
             whatsappAccountId: accountId,
             direction,
             remoteJid,
@@ -282,7 +282,7 @@ export class ConnectionManager extends EventEmitter {
             whatsappMessageId: msg.key.id || null,
             content: content.substring(0, 200),
             status: connData.chatwootService ? "pending" : "no_chatwoot",
-          });
+          }).catch((err) => console.error("[ConnectionManager] Failed to save message log:", err));
         }
 
         if (!connData.chatwootService) {
