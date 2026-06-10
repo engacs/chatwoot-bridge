@@ -71,7 +71,7 @@ export class ConnectionManager extends EventEmitter {
         keys: makeCacheableSignalKeyStore(state.keys, logger),
       },
       logger,
-      browser: ["WhatsApp-Chatwoot Bridge", "Chrome", "1.0.0"],
+      browser: [`WA Bridge - ${account.label} (#${accountId})`, "Chrome", "1.0.0"],
       connectTimeoutMs: 60000,
       keepAliveIntervalMs: 30000,
       emitOwnEvents: false,
@@ -491,6 +491,55 @@ export class ConnectionManager extends EventEmitter {
     }
   }
 
+  async sendPresenceUpdate(accountId: number, jid: string, presence: "composing" | "paused"): Promise<void> {
+    const connData = this.connections.get(accountId);
+    if (!connData?.socket) return;
+    const remoteJid = jid.includes("@") ? jid : `${jid}@s.whatsapp.net`;
+    await connData.socket.sendPresenceUpdate(presence, remoteJid);
+  }
+
+  async deleteWhatsAppMessage(accountId: number, remoteJid: string, whatsappMessageId: string, fromMe: boolean): Promise<void> {
+    const connData = this.connections.get(accountId);
+    if (!connData?.socket) throw new Error(`Account ${accountId} not connected`);
+    const jid = remoteJid.includes("@") ? remoteJid : `${remoteJid}@s.whatsapp.net`;
+    await connData.socket.sendMessage(jid, {
+      delete: { remoteJid: jid, id: whatsappMessageId, fromMe },
+    });
+  }
+
+  async getGroups(accountId: number): Promise<Record<string, any>> {
+    const connData = this.connections.get(accountId);
+    if (!connData?.socket) throw new Error(`Account ${accountId} not connected`);
+    return (connData.socket as any).groupFetchAllParticipating();
+  }
+
+  async getGroupMetadata(accountId: number, groupJid: string): Promise<any> {
+    const connData = this.connections.get(accountId);
+    if (!connData?.socket) throw new Error(`Account ${accountId} not connected`);
+    const jid = groupJid.includes("@") ? groupJid : `${groupJid}@g.us`;
+    return connData.socket.groupMetadata(jid);
+  }
+
+  async getContactInfo(accountId: number, phoneNumber: string): Promise<any> {
+    const connData = this.connections.get(accountId);
+    if (!connData?.socket) throw new Error(`Account ${accountId} not connected`);
+    const jid = phoneNumber.includes("@") ? phoneNumber : `${phoneNumber}@s.whatsapp.net`;
+
+    const timeout = <T>(p: Promise<T>, ms: number) =>
+      Promise.race([p, new Promise<null>((resolve) => setTimeout(() => resolve(null), ms))]);
+
+    const ppUrl = await timeout(
+      connData.socket.profilePictureUrl(jid, "image").catch(() => null),
+      5000
+    );
+
+    return {
+      jid,
+      exists: true,
+      profilePicture: ppUrl,
+    };
+  }
+
   async fetchBlocklist(accountId: number): Promise<string[]> {
     const connData = this.connections.get(accountId);
     if (!connData?.socket) throw new Error(`Account ${accountId} not connected`);
@@ -527,35 +576,16 @@ export class ConnectionManager extends EventEmitter {
     const jid = phoneNumber.includes("@") ? phoneNumber : `${phoneNumber}@s.whatsapp.net`;
     const result: { profilePicture?: string; status?: string; exists: boolean } = { exists: false };
 
+    const timeout = <T>(p: Promise<T>, ms: number) =>
+      Promise.race([p, new Promise<null>((resolve) => setTimeout(() => resolve(null), ms))]);
+
     try {
-      // Check if user exists on WhatsApp
-      const existsResult = await connData.socket.onWhatsApp(jid);
-      if (!existsResult || !existsResult.length || !existsResult[0]?.exists) {
-        return result;
-      }
       result.exists = true;
-
-      // Get profile picture
-      try {
-        const ppUrl = await connData.socket.profilePictureUrl(jid, "image");
-        result.profilePicture = ppUrl;
-      } catch (e) {
-        // User may not have a profile picture
-      }
-
-      // Get status/about - fetchStatus returns array format in newer Baileys
-      try {
-        const statusResult = await connData.socket.fetchStatus(jid) as any;
-        if (statusResult && Array.isArray(statusResult) && statusResult[0]?.status) {
-          result.status = statusResult[0].status;
-        } else if (statusResult?.status) {
-          result.status = statusResult.status;
-        }
-      } catch (e) {
-        // Status may not be available
-      }
-
-      console.log(`[ConnectionManager] Got profile for ${jid}: pic=${!!result.profilePicture}, status=${!!result.status}`);
+      const ppUrl = await timeout(
+        connData.socket.profilePictureUrl(jid, "image").catch(() => null),
+        5000
+      );
+      if (ppUrl) result.profilePicture = ppUrl as string;
       return result;
     } catch (error) {
       console.error(`[ConnectionManager] Failed to get profile for ${jid}:`, error);

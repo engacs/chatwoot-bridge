@@ -8,6 +8,7 @@ import Dashboard from "@/pages/dashboard";
 import AuthPage from "@/pages/auth";
 import AdminPage from "@/pages/admin";
 import WebhooksPage from "@/pages/webhooks";
+import TestPage from "@/pages/test";
 import NotFound from "@/pages/not-found";
 import { Loader2 } from "lucide-react";
 
@@ -102,6 +103,9 @@ function Router() {
       </Route>
       <Route path="/account/:id">
         {() => <ProtectedRoute component={Dashboard} />}
+      </Route>
+      <Route path="/test/:id">
+        {() => <ProtectedRoute component={TestPage} />}
       </Route>
       <Route component={NotFound} />
     </Switch>

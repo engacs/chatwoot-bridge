@@ -444,9 +444,43 @@ export class ChatwootService {
     content?: string;
     conversationId?: number;
     attachments?: Array<{ url: string; type: string; name?: string }>;
+    shouldTyping?: boolean;
+    shouldTypingOff?: boolean;
+    shouldDeleteMessage?: boolean;
+    chatwootMessageIdToDelete?: string;
   }> {
     console.log(`[Chatwoot] Processing webhook event: ${payload.event}, type: ${payload.message_type}, private: ${payload.private}`);
-    
+
+    // Typing presence
+    if (payload.event === "conversation_typing_on" || payload.event === "conversation_typing_off") {
+      const sourceId = (payload as any).conversation?.contact_inbox?.source_id as string | undefined;
+      const phone = sourceId?.split(":")[0] || sourceId;
+      if (!phone) return { shouldReply: false };
+      return {
+        shouldReply: false,
+        phoneNumber: phone,
+        shouldTyping: payload.event === "conversation_typing_on",
+        shouldTypingOff: payload.event === "conversation_typing_off",
+      };
+    }
+
+    // Message deleted in Chatwoot → delete on WhatsApp
+    if (payload.event === "message_updated") {
+      const contentAttrs = (payload as any).content_attributes as Record<string, any> | undefined;
+      if (contentAttrs?.deleted === true) {
+        const chatwootMsgId = String(payload.id || "");
+        const sourceId = (payload as any).conversation?.contact_inbox?.source_id as string | undefined;
+        const phone = sourceId?.split(":")[0] || sourceId;
+        return {
+          shouldReply: false,
+          phoneNumber: phone,
+          shouldDeleteMessage: true,
+          chatwootMessageIdToDelete: chatwootMsgId,
+        };
+      }
+      return { shouldReply: false };
+    }
+
     if (payload.event !== "message_created") {
       console.log(`[Chatwoot] Ignoring non-message event: ${payload.event}`);
       return { shouldReply: false };
@@ -535,14 +569,15 @@ export class ChatwootService {
     phoneNumber: string,
     content: string,
     whatsappMessageId: string | null,
-    status: "sent" | "failed"
+    status: "sent" | "failed",
+    chatwootMessageId?: string | null
   ): Promise<void> {
     await storage.addMessageLog({
       whatsappAccountId: this.whatsappAccountId,
       direction: "outgoing",
       remoteJid: `${phoneNumber}@s.whatsapp.net`,
       remoteName: null,
-      chatwootMessageId: null,
+      chatwootMessageId: chatwootMessageId || null,
       whatsappMessageId,
       content: content.substring(0, 200),
       status,

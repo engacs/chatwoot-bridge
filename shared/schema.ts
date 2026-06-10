@@ -177,7 +177,7 @@ export const chatwootWebhookPayload = z.object({
   }).optional(),
   conversation: z.object({
     id: z.number(),
-    inbox_id: z.number(),
+    inbox_id: z.number().optional(),
     status: z.string().optional(),
     contact_inbox: z.object({
       source_id: z.string().optional().nullable(),

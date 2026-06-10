@@ -206,6 +206,13 @@ class DatabaseStorage implements IStorage {
     return log || undefined;
   }
 
+  async getMessageByChatwootId(whatsappAccountId: number, chatwootId: string): Promise<MessageLog | undefined> {
+    const [log] = await db.select().from(messageLogs).where(
+      and(eq(messageLogs.whatsappAccountId, whatsappAccountId), eq(messageLogs.chatwootMessageId, chatwootId))
+    );
+    return log || undefined;
+  }
+
   async deleteOldMessageLogs(olderThanDays: number): Promise<number> {
     const cutoff = new Date();
     cutoff.setDate(cutoff.getDate() - olderThanDays);

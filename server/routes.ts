@@ -10,11 +10,28 @@ import { connectionManager } from "./services/connection-manager";
 import { ChatwootService } from "./services/chatwoot";
 import { chatwootWebhookPayload, insertChatwootConfigSchema } from "@shared/schema";
 
-// Auth middleware
-function requireAuth(req: Request, res: Response, next: NextFunction) {
-  if (req.isAuthenticated()) {
-    return next();
+// Auth middleware — supports session OR Bearer API token
+async function requireAuth(req: Request, res: Response, next: NextFunction) {
+  if (req.isAuthenticated()) return next();
+
+  const authHeader = req.headers["authorization"];
+  if (authHeader?.startsWith("Bearer ")) {
+    const token = authHeader.slice(7);
+    const storedRaw = await storage.getSetting(`api_token_${token.substring(0, 8)}`);
+    if (storedRaw) {
+      const { userId, hash } = JSON.parse(storedRaw);
+      const valid = await bcrypt.compare(token, hash);
+      if (valid) {
+        const user = await storage.getUser(userId);
+        if (user) {
+          req.user = { id: user.id, username: user.username, email: user.email, isAdmin: user.isAdmin, isEnabled: user.isEnabled };
+          return next();
+        }
+      }
+    }
+    return res.status(401).json({ error: "Invalid API token" });
   }
+
   res.status(401).json({ error: "Not authenticated" });
 }
 
@@ -124,17 +141,91 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     if (req.isAuthenticated()) {
       const user = await storage.getUser(req.user!.id);
       if (user) {
-        res.json({ 
-          id: user.id, 
-          username: user.username, 
-          email: user.email,
-          isAdmin: user.isAdmin 
-        });
+        res.json({ id: user.id, username: user.username, email: user.email, isAdmin: user.isAdmin });
       } else {
         res.status(401).json({ error: "User not found" });
       }
     } else {
       res.status(401).json({ error: "Not authenticated" });
+    }
+  });
+
+  // ========== API TOKEN ==========
+
+  app.get("/api/auth/token", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userId = req.user!.id;
+      const prefixKey = `api_token_prefix_${userId}`;
+      const prefix = await storage.getSetting(prefixKey);
+      res.json({ hasToken: !!prefix, prefix: prefix || null });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to get token info" });
+    }
+  });
+
+  app.post("/api/auth/token", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userId = req.user!.id;
+
+      // Revoke old token if exists
+      const oldPrefix = await storage.getSetting(`api_token_prefix_${userId}`);
+      if (oldPrefix) {
+        await storage.setSetting(`api_token_${oldPrefix}`, "");
+      }
+
+      // Generate new token
+      const token = crypto.randomBytes(32).toString("hex");
+      const prefix = token.substring(0, 8);
+      const hash = await bcrypt.hash(token, 10);
+
+      await storage.setSetting(`api_token_${prefix}`, JSON.stringify({ userId, hash }));
+      await storage.setSetting(`api_token_prefix_${userId}`, prefix);
+
+      res.json({ token, prefix });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to generate token" });
+    }
+  });
+
+  app.delete("/api/auth/token", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userId = req.user!.id;
+      const prefix = await storage.getSetting(`api_token_prefix_${userId}`);
+      if (prefix) {
+        await storage.setSetting(`api_token_${prefix}`, "");
+        await storage.setSetting(`api_token_prefix_${userId}`, "");
+      }
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to revoke token" });
+    }
+  });
+
+  // ========== CHANGE PASSWORD ==========
+
+  app.post("/api/auth/change-password", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const { currentPassword, newPassword } = req.body;
+      if (!currentPassword || !newPassword) {
+        return res.status(400).json({ error: "currentPassword and newPassword are required" });
+      }
+      if (newPassword.length < 8) {
+        return res.status(400).json({ error: "New password must be at least 8 characters" });
+      }
+
+      const user = await storage.getUser(req.user!.id);
+      if (!user) return res.status(404).json({ error: "User not found" });
+
+      const valid = await bcrypt.compare(currentPassword, user.password);
+      if (!valid) return res.status(401).json({ error: "Current password is incorrect" });
+
+      const hashed = await bcrypt.hash(newPassword, 10);
+      await storage.updateUser(req.user!.id, { password: hashed });
+
+      res.json({ success: true });
+    } catch (error) {
+      console.error("[Auth] Change password error:", error);
+      res.status(500).json({ error: "Failed to change password" });
     }
   });
 
@@ -848,6 +939,91 @@ export async function registerRoutes(httpServer: Server, app: Express) {
     }
   });
 
+  // ========== WHATSAPP GROUPS ==========
+
+  app.get("/api/whatsapp/accounts/:id/groups", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const accountId = parseInt(req.params.id);
+      const account = await storage.getWhatsappAccount(accountId);
+      if (!account) return res.status(404).json({ error: "Account not found" });
+      if (account.userId !== req.user!.id && !req.user!.isAdmin) return res.status(403).json({ error: "Access denied" });
+      if (!connectionManager.isConnected(accountId)) return res.status(400).json({ error: "WhatsApp not connected" });
+      const groups = await connectionManager.getGroups(accountId);
+      const list = Object.values(groups).map((g: any) => ({
+        id: g.id,
+        subject: g.subject,
+        participantCount: g.participants?.length ?? 0,
+        creation: g.creation,
+        owner: g.owner,
+        desc: g.desc,
+      }));
+      res.json(list);
+    } catch (error) {
+      console.error("[API] Error getting groups:", error);
+      res.status(500).json({ error: "Failed to get groups" });
+    }
+  });
+
+  app.get("/api/whatsapp/accounts/:id/groups/:jid", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const accountId = parseInt(req.params.id);
+      const account = await storage.getWhatsappAccount(accountId);
+      if (!account) return res.status(404).json({ error: "Account not found" });
+      if (account.userId !== req.user!.id && !req.user!.isAdmin) return res.status(403).json({ error: "Access denied" });
+      if (!connectionManager.isConnected(accountId)) return res.status(400).json({ error: "WhatsApp not connected" });
+      const meta = await connectionManager.getGroupMetadata(accountId, req.params.jid);
+      res.json(meta);
+    } catch (error) {
+      console.error("[API] Error getting group metadata:", error);
+      res.status(500).json({ error: "Failed to get group metadata" });
+    }
+  });
+
+  // ========== CONTACT INFO ==========
+
+  app.get("/api/whatsapp/accounts/:id/contact/:phoneNumber", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const accountId = parseInt(req.params.id);
+      const account = await storage.getWhatsappAccount(accountId);
+      if (!account) return res.status(404).json({ error: "Account not found" });
+      if (account.userId !== req.user!.id && !req.user!.isAdmin) return res.status(403).json({ error: "Access denied" });
+      if (!connectionManager.isConnected(accountId)) return res.status(400).json({ error: "WhatsApp not connected" });
+      const info = await connectionManager.getContactInfo(accountId, req.params.phoneNumber);
+      res.json(info);
+    } catch (error) {
+      console.error("[API] Error getting contact info:", error);
+      res.status(500).json({ error: "Failed to get contact info" });
+    }
+  });
+
+  // ========== SEND MESSAGE (manual/test) ==========
+
+  app.post("/api/whatsapp/accounts/:id/send", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const accountId = parseInt(req.params.id);
+      const { phoneNumber, content } = req.body;
+
+      if (!phoneNumber || !content) {
+        return res.status(400).json({ error: "phoneNumber and content are required" });
+      }
+
+      const account = await storage.getWhatsappAccount(accountId);
+      if (!account) return res.status(404).json({ error: "Account not found" });
+      if (account.userId !== req.user!.id && !req.user!.isAdmin) {
+        return res.status(403).json({ error: "Access denied" });
+      }
+      if (!connectionManager.isConnected(accountId)) {
+        return res.status(400).json({ error: "WhatsApp not connected" });
+      }
+
+      const result = await connectionManager.sendMessage(accountId, phoneNumber, content);
+      res.json({ success: true, key: result?.key });
+    } catch (error) {
+      console.error("[API] Error sending message:", error);
+      res.status(500).json({ error: "Failed to send message" });
+    }
+  });
+
   // ========== USER PROFILE ROUTE ==========
 
   app.get("/api/whatsapp/accounts/:id/profile/:phoneNumber", requireAuth, async (req: Request, res: Response) => {
@@ -950,6 +1126,34 @@ export async function registerRoutes(httpServer: Server, app: Express) {
       // Process the webhook
       const chatwootService = new ChatwootService(chatwootConfig, accountId);
       const result = await chatwootService.processWebhook(parseResult.data);
+      const chatwootMsgId = parseResult.data.id ? String(parseResult.data.id) : null;
+
+      // Typing presence: forward agent typing state to WhatsApp
+      if ((result.shouldTyping || result.shouldTypingOff) && result.phoneNumber) {
+        try {
+          const presence = result.shouldTyping ? "composing" : "paused";
+          await connectionManager.sendPresenceUpdate(accountId, result.phoneNumber, presence);
+          console.log(`[Webhook] Account ${accountId} sent presence '${presence}' to ${result.phoneNumber}`);
+        } catch (e) {
+          console.error(`[Webhook] Failed to send presence:`, e);
+        }
+      }
+
+      // Delete: agent deleted a message in Chatwoot → delete on WhatsApp
+      if (result.shouldDeleteMessage && result.chatwootMessageIdToDelete && result.phoneNumber) {
+        try {
+          const log = await storage.getMessageByChatwootId(accountId, result.chatwootMessageIdToDelete);
+          if (log?.whatsappMessageId) {
+            const jid = result.phoneNumber.includes("@") ? result.phoneNumber : `${result.phoneNumber}@s.whatsapp.net`;
+            await connectionManager.deleteWhatsAppMessage(accountId, jid, log.whatsappMessageId, log.direction === "outgoing");
+            console.log(`[Webhook] Account ${accountId} deleted WA message ${log.whatsappMessageId}`);
+          } else {
+            console.warn(`[Webhook] No WA message ID found for Chatwoot message ${result.chatwootMessageIdToDelete}`);
+          }
+        } catch (e) {
+          console.error(`[Webhook] Failed to delete WA message:`, e);
+        }
+      }
 
       if (result.shouldReply && result.phoneNumber) {
         try {
@@ -965,7 +1169,8 @@ export async function registerRoutes(httpServer: Server, app: Express) {
               result.phoneNumber,
               result.content,
               msgResult?.key?.id || null,
-              "sent"
+              "sent",
+              chatwootMsgId
             );
 
             console.log(`[Webhook] Account ${accountId} sent message to ${result.phoneNumber}`);
@@ -976,13 +1181,13 @@ export async function registerRoutes(httpServer: Server, app: Express) {
             for (const attachment of result.attachments) {
               try {
                 console.log(`[Webhook] Sending attachment: ${attachment.type} - ${attachment.url}`);
-                
+
                 const mediaResult = await connectionManager.sendMediaMessage(
                   accountId,
                   result.phoneNumber,
                   attachment.url,
                   attachment.type,
-                  undefined, // caption already sent with text
+                  undefined,
                   attachment.name
                 );
 
@@ -990,31 +1195,34 @@ export async function registerRoutes(httpServer: Server, app: Express) {
                   result.phoneNumber,
                   `[Media: ${attachment.type}] ${attachment.name || "attachment"}`,
                   mediaResult?.key?.id || null,
-                  "sent"
+                  "sent",
+                  chatwootMsgId
                 );
 
                 console.log(`[Webhook] Account ${accountId} sent media to ${result.phoneNumber}: ${attachment.type}`);
               } catch (mediaError) {
                 console.error(`[Webhook] Failed to send media attachment:`, mediaError);
-                
+
                 await chatwootService.logOutgoingMessage(
                   result.phoneNumber,
                   `[Media: ${attachment.type}] Failed to send`,
                   null,
-                  "failed"
+                  "failed",
+                  chatwootMsgId
                 );
               }
             }
           }
         } catch (error) {
           console.error(`[Webhook] Failed to send message for account ${accountId}:`, error);
-          
+
           if (result.content) {
             await chatwootService.logOutgoingMessage(
               result.phoneNumber,
               result.content,
               null,
-              "failed"
+              "failed",
+              chatwootMsgId
             );
           }
         }
