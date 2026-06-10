@@ -172,8 +172,9 @@ export class ChatwootService {
       return existingContact;
     }
 
+    // Do NOT pass inbox_id — Chatwoot would auto-create a contact_inbox with a random
+    // UUID source_id, which then conflicts when we create a conversation with our own source_id.
     const contactData: any = {
-      inbox_id: parseInt(this.inboxId, 10),
       name: name || `WhatsApp ${cleanPhone}`,
       identifier: cleanPhone,
     };
@@ -258,9 +259,12 @@ export class ChatwootService {
     sourceId: string,
     contactId: number
   ): Promise<ChatwootConversation | null> {
+    // Normalize source_id: strip `:N` device suffix (e.g. "252618629126:0@s.whatsapp.net" → "252618629126@s.whatsapp.net")
+    const normalizedSourceId = sourceId.replace(/:(\d+)(@)/, "$2");
+
     // Check cache first
-    if (this.conversationCache.has(sourceId)) {
-      const cachedId = this.conversationCache.get(sourceId)!;
+    if (this.conversationCache.has(normalizedSourceId)) {
+      const cachedId = this.conversationCache.get(normalizedSourceId)!;
       await this.reopenConversationIfNeeded(cachedId);
       return { id: cachedId, inbox_id: parseInt(this.inboxId, 10), contact: {} as ChatwootContact };
     }
@@ -277,14 +281,14 @@ export class ChatwootService {
       const existing = contactConvs.payload.find((conv) => conv.inbox_id === inboxId);
       if (existing) {
         console.log(`[Chatwoot] Found existing conversation ${existing.id} for contact ${contactId}`);
-        this.conversationCache.set(sourceId, existing.id);
+        this.conversationCache.set(normalizedSourceId, existing.id);
         await this.reopenConversationIfNeeded(existing.id);
         return existing;
       }
     }
 
     // No existing conversation — create one
-    const cleanPhone = sourceId.replace("@s.whatsapp.net", "").replace("@g.us", "").replace(/:\d+$/, "");
+    const cleanPhone = normalizedSourceId.replace("@s.whatsapp.net", "").replace("@g.us", "");
     console.log(`[Chatwoot] Creating new conversation for contact ${contactId} (${cleanPhone})`);
 
     const createResult = await this.apiRequest<ChatwootConversation>(
@@ -293,16 +297,17 @@ export class ChatwootService {
       {
         inbox_id: parseInt(this.inboxId, 10),
         contact_id: contactId,
-        source_id: sourceId,
+        source_id: normalizedSourceId,
       }
     );
 
     if (createResult) {
-      this.conversationCache.set(sourceId, createResult.id);
+      this.conversationCache.set(normalizedSourceId, createResult.id);
       return createResult;
     }
 
-    // If creation failed (e.g. source_id conflict), fall back to the contact's conversations
+    // If creation failed (e.g. source_id conflict from a pre-existing contact_inbox),
+    // fall back to whatever conversation the contact already has in this inbox.
     console.warn(`[Chatwoot] Conversation create failed for contact ${contactId}, falling back to contact conversations`);
     const retry = await this.apiRequest<{ payload: ChatwootConversation[] }>(
       "GET",
@@ -311,7 +316,7 @@ export class ChatwootService {
     const inboxId = parseInt(this.inboxId, 10);
     const fallback = retry?.payload?.find((conv) => conv.inbox_id === inboxId) || null;
     if (fallback) {
-      this.conversationCache.set(sourceId, fallback.id);
+      this.conversationCache.set(normalizedSourceId, fallback.id);
       await this.reopenConversationIfNeeded(fallback.id);
     }
     return fallback;
