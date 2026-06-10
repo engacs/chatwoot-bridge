@@ -93,23 +93,19 @@ export class ChatwootService {
   private async sendMessageWithAttachment(
     conversationId: number,
     content: string,
-    media: { buffer: Buffer; type: string; mimeType: string; fileName: string }
+    media: { buffer: Buffer; type: string; mimeType: string; fileName: string },
+    messageType: "incoming" | "outgoing" = "incoming",
+    isPrivate: boolean = false
   ): Promise<{ id: number } | null> {
     const url = `${this.baseUrl}/api/v1/accounts/${this.accountId}/conversations/${conversationId}/messages`;
 
     try {
-      // Create form data manually for Node.js
       const boundary = `----WebKitFormBoundary${Date.now().toString(16)}`;
       const parts: Buffer[] = [];
 
-      // Add content field
       parts.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="content"\r\n\r\n${content}\r\n`));
-
-      // Add message_type field
-      parts.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="message_type"\r\n\r\nincoming\r\n`));
-
-      // Add private field
-      parts.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="private"\r\n\r\nfalse\r\n`));
+      parts.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="message_type"\r\n\r\n${messageType}\r\n`));
+      parts.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="private"\r\n\r\n${isPrivate}\r\n`));
 
       // Add attachment
       parts.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="attachments[]"; filename="${media.fileName}"\r\nContent-Type: ${media.mimeType}\r\n\r\n`));
@@ -425,8 +421,8 @@ export class ChatwootService {
 
     let messageResult: { id: number } | null = null;
 
-    if (media && !isFromMe) {
-      messageResult = await this.sendMessageWithAttachment(conversation.id, finalContent, media);
+    if (media) {
+      messageResult = await this.sendMessageWithAttachment(conversation.id, finalContent, media, messageType, isPrivate);
     } else {
       messageResult = await this.apiRequest<{ id: number }>(
         "POST",
