@@ -258,54 +258,35 @@ export class ChatwootService {
     sourceId: string,
     contactId: number
   ): Promise<ChatwootConversation | null> {
-    const cleanPhone = sourceId.replace("@s.whatsapp.net", "").replace("@g.us", "").replace(/:\d+$/, "");
-    
     // Check cache first
     if (this.conversationCache.has(sourceId)) {
       const cachedId = this.conversationCache.get(sourceId)!;
-      // Still need to check if conversation needs to be reopened
       await this.reopenConversationIfNeeded(cachedId);
       return { id: cachedId, inbox_id: parseInt(this.inboxId, 10), contact: {} as ChatwootContact };
     }
 
-    // Search for existing conversations with this contact in this inbox (including closed ones)
-    const conversations = await this.apiRequest<{ payload: ChatwootConversation[] }>(
+    // Look up existing conversations for this contact directly — avoids phone-matching heuristics
+    // and handles LID/phone JID mismatches where source_id changed between messages.
+    const contactConvs = await this.apiRequest<{ payload: ChatwootConversation[] }>(
       "GET",
-      `/api/v1/accounts/${this.accountId}/conversations?inbox_id=${this.inboxId}&status=all`
+      `/api/v1/accounts/${this.accountId}/contacts/${contactId}/conversations`
     );
 
-    if (conversations?.payload) {
-      // Find conversation matching this phone number
-      const existing = conversations.payload.find((conv) => {
-        // Check by contact phone number
-        if (conv.contact?.phone_number?.includes(cleanPhone)) {
-          return true;
-        }
-        // Check by contact identifier
-        if (conv.contact?.identifier?.includes(cleanPhone)) {
-          return true;
-        }
-        // Also check contact_inbox source_id if available
-        const convSourceId = (conv as any).contact_inbox?.source_id;
-        if (convSourceId && convSourceId.includes(cleanPhone)) {
-          return true;
-        }
-        return false;
-      });
-
+    if (contactConvs?.payload?.length) {
+      const inboxId = parseInt(this.inboxId, 10);
+      const existing = contactConvs.payload.find((conv) => conv.inbox_id === inboxId);
       if (existing) {
-        console.log(`[Chatwoot] Found existing conversation ${existing.id} for ${cleanPhone}`);
+        console.log(`[Chatwoot] Found existing conversation ${existing.id} for contact ${contactId}`);
         this.conversationCache.set(sourceId, existing.id);
-        
-        // Reopen the conversation if it's closed/resolved
         await this.reopenConversationIfNeeded(existing.id);
-        
         return existing;
       }
     }
 
-    // No existing conversation found - create a new one
+    // No existing conversation — create one
+    const cleanPhone = sourceId.replace("@s.whatsapp.net", "").replace("@g.us", "").replace(/:\d+$/, "");
     console.log(`[Chatwoot] Creating new conversation for contact ${contactId} (${cleanPhone})`);
+
     const createResult = await this.apiRequest<ChatwootConversation>(
       "POST",
       `/api/v1/accounts/${this.accountId}/conversations`,
@@ -318,9 +299,22 @@ export class ChatwootService {
 
     if (createResult) {
       this.conversationCache.set(sourceId, createResult.id);
+      return createResult;
     }
 
-    return createResult;
+    // If creation failed (e.g. source_id conflict), fall back to the contact's conversations
+    console.warn(`[Chatwoot] Conversation create failed for contact ${contactId}, falling back to contact conversations`);
+    const retry = await this.apiRequest<{ payload: ChatwootConversation[] }>(
+      "GET",
+      `/api/v1/accounts/${this.accountId}/contacts/${contactId}/conversations`
+    );
+    const inboxId = parseInt(this.inboxId, 10);
+    const fallback = retry?.payload?.find((conv) => conv.inbox_id === inboxId) || null;
+    if (fallback) {
+      this.conversationCache.set(sourceId, fallback.id);
+      await this.reopenConversationIfNeeded(fallback.id);
+    }
+    return fallback;
   }
 
   private async reopenConversationIfNeeded(conversationId: number): Promise<void> {
