@@ -96,7 +96,7 @@ export class ChatwootService {
     media: { buffer: Buffer; type: string; mimeType: string; fileName: string }
   ): Promise<{ id: number } | null> {
     const url = `${this.baseUrl}/api/v1/accounts/${this.accountId}/conversations/${conversationId}/messages`;
-    
+
     try {
       // Create form data manually for Node.js
       const boundary = `----WebKitFormBoundary${Date.now().toString(16)}`;
@@ -104,13 +104,13 @@ export class ChatwootService {
 
       // Add content field
       parts.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="content"\r\n\r\n${content}\r\n`));
-      
+
       // Add message_type field
       parts.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="message_type"\r\n\r\nincoming\r\n`));
-      
+
       // Add private field
       parts.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="private"\r\n\r\nfalse\r\n`));
-      
+
       // Add attachment
       parts.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="attachments[]"; filename="${media.fileName}"\r\nContent-Type: ${media.mimeType}\r\n\r\n`));
       parts.push(media.buffer);
@@ -237,20 +237,20 @@ export class ChatwootService {
         console.error(`[Chatwoot] Failed to download avatar: ${response.status}`);
         return;
       }
-      
+
       const buffer = Buffer.from(await response.arrayBuffer());
       const contentType = response.headers.get("content-type") || "image/jpeg";
-      
+
       // Upload avatar using multipart form
       const boundary = `----WebKitFormBoundary${Date.now().toString(16)}`;
       const parts: Buffer[] = [];
-      
+
       parts.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="avatar"; filename="avatar.jpg"\r\nContent-Type: ${contentType}\r\n\r\n`));
       parts.push(buffer);
       parts.push(Buffer.from(`\r\n--${boundary}--\r\n`));
-      
+
       const body = Buffer.concat(parts);
-      
+
       const uploadResponse = await fetch(
         `${this.baseUrl}/api/v1/accounts/${this.accountId}/contacts/${contactId}`,
         {
@@ -262,7 +262,7 @@ export class ChatwootService {
           body,
         }
       );
-      
+
       if (uploadResponse.ok) {
         console.log(`[Chatwoot] Updated avatar for contact ${contactId}`);
       } else {
@@ -408,10 +408,13 @@ export class ChatwootService {
     if (isGroup && !isFromMe) {
       finalContent = `*${senderName}:* ${content}`;
     } else if (isFromMe) {
-      finalContent = `📱 From mobile\n${content}`;
+      finalContent = `${content} \n📱 <i>From mobile</i>`;
     }
 
+    // fromMe messages are posted as private notes — this guarantees the webhook's own
+    // `private === true` filter blocks re-sending, with no race-condition risk.
     const messageType = isFromMe ? "outgoing" : "incoming";
+    const isPrivate = isFromMe;
 
     let messageResult: { id: number } | null = null;
 
@@ -424,7 +427,7 @@ export class ChatwootService {
         {
           content: finalContent,
           message_type: messageType,
-          private: false,
+          private: isPrivate,
         }
       );
     }
