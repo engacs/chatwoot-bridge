@@ -184,13 +184,18 @@ export class ChatwootService {
       contactData.phone_number = `+${cleanPhone}`;
     }
 
-    const createResult = await this.apiRequest<{ payload: { contact: ChatwootContact } }>(
+    const createResult = await this.apiRequest<any>(
       "POST",
       `/api/v1/accounts/${this.accountId}/contacts`,
       contactData
     );
 
-    const contact = createResult?.payload?.contact || null;
+    // Chatwoot may return { payload: { contact: {...} } } or { payload: {...} } or the contact directly
+    const contact: ChatwootContact | null =
+      createResult?.payload?.contact ||
+      (createResult?.payload?.id ? createResult.payload : null) ||
+      (createResult?.id ? createResult : null) ||
+      null;
 
     if (contact && avatarUrl) {
       await this.updateContactAvatar(contact.id, avatarUrl);
@@ -392,15 +397,17 @@ export class ChatwootService {
     const contactName = isGroup ? (groupName || remoteJid) : (pushName || undefined);
     const contact = await this.findOrCreateContact(contactJid, contactName, avatarUrl);
     if (!contact) {
-      console.error("[Chatwoot] Failed to create/find contact");
+      console.error(`[Chatwoot] Failed to create/find contact for ${contactJid}`);
       return;
     }
+    console.log(`[Chatwoot] Contact ${contact.id} ready for ${contactJid}`);
 
     const conversation = await this.findOrCreateConversation(remoteJid, contact.id);
     if (!conversation) {
-      console.error("[Chatwoot] Failed to create/find conversation");
+      console.error(`[Chatwoot] Failed to create/find conversation for contact ${contact.id} (${remoteJid})`);
       return;
     }
+    console.log(`[Chatwoot] Conversation ${conversation.id} ready`);
 
     // For group messages, prefix sender name. For fromMe, prefix "📱 From mobile:" so agents know it was sent from the phone.
     const senderName = pushName || senderJid.replace("@s.whatsapp.net", "");
