@@ -224,33 +224,31 @@ export default function WebhooksPage() {
               )}
             </DialogTitle>
           </DialogHeader>
-          <ScrollArea className="flex-1 min-h-0 pr-2">
-            <div className="space-y-4">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1">URL</p>
-                <code className="text-xs bg-muted p-2 rounded block break-all">{selectedLog?.url}</code>
-              </div>
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1">Headers</p>
-                <div className="bg-muted rounded-md p-3 space-y-1">
-                  {selectedLog?.headers && Object.entries(selectedLog.headers).map(([key, val]) => (
-                    <div key={key} className="flex gap-2 text-xs font-mono">
-                      <span className="text-blue-600 dark:text-blue-400 shrink-0">{key}:</span>
-                      <span className="break-all text-muted-foreground">{String(val)}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1">Body</p>
-                <div className="bg-muted rounded-md p-3 overflow-x-auto">
-                  <pre className="text-xs font-mono whitespace-pre break-normal min-w-0">
-                    {JSON.stringify(selectedLog?.body, null, 2)}
-                  </pre>
-                </div>
+          <div className="flex-1 min-h-0 overflow-y-auto pr-2 space-y-4">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1">URL</p>
+              <code className="text-xs bg-muted p-2 rounded block break-all">{selectedLog?.url}</code>
+            </div>
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1">Headers</p>
+              <div className="bg-muted rounded-md p-3 space-y-1">
+                {selectedLog?.headers && Object.entries(selectedLog.headers).map(([key, val]) => (
+                  <div key={key} className="flex gap-2 text-xs font-mono">
+                    <span className="text-blue-600 dark:text-blue-400 shrink-0">{key}:</span>
+                    <span className="break-all text-muted-foreground">{String(val)}</span>
+                  </div>
+                ))}
               </div>
             </div>
-          </ScrollArea>
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1">Body</p>
+              <div className="bg-muted rounded-md p-3 overflow-auto max-h-[50vh]">
+                <pre className="text-xs font-mono whitespace-pre">
+                  {JSON.stringify(selectedLog?.body, null, 2)}
+                </pre>
+              </div>
+            </div>
+          </div>
         </DialogContent>
       </Dialog>
     </div>
