@@ -222,8 +222,10 @@ export class ConnectionManager extends EventEmitter {
         if (isGroup) {
           const cacheKey = `${accountId}:${remoteJid}`;
           if (this.groupNameCache.has(cacheKey)) {
+            // Cache hit — instant
             groupName = this.groupNameCache.get(cacheKey)!;
           } else {
+            // Fast path: groupMetadata with 3s timeout (works for known/cached groups)
             try {
               const metadata = await Promise.race([
                 socket.groupMetadata(remoteJid),
@@ -234,7 +236,24 @@ export class ConnectionManager extends EventEmitter {
             } catch {
               groupName = null;
             }
-            // If still no name, fetch in background for next message
+
+            // Fallback: check groupFetchAllParticipating — Baileys syncs all groups on connect,
+            // so this is usually cached and returns immediately without a network call.
+            if (!groupName) {
+              try {
+                const allGroups = await Promise.race([
+                  socket.groupFetchAllParticipating(),
+                  new Promise<null>((resolve) => setTimeout(() => resolve(null), 2000)),
+                ]);
+                const found = allGroups?.[remoteJid];
+                groupName = found?.subject || null;
+                if (groupName) this.groupNameCache.set(cacheKey, groupName);
+              } catch {
+                groupName = null;
+              }
+            }
+
+            // Background fetch: populate cache for next message regardless
             if (!groupName) {
               socket.groupMetadata(remoteJid)
                 .then((m) => { if (m?.subject) this.groupNameCache.set(cacheKey, m.subject); })
