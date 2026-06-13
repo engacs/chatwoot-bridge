@@ -204,6 +204,10 @@ export class ConnectionManager extends EventEmitter {
 
         const isFromMe = msg.key.fromMe === true;
         let remoteJid = msg.key.remoteJid || "";
+
+        // Skip WhatsApp Status/Story broadcasts
+        if (remoteJid === "status@broadcast") continue;
+
         const isGroup = remoteJid.endsWith("@g.us");
 
         // For group messages, the sender is in msg.key.participant (not remoteJid).
