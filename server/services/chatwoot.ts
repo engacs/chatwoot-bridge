@@ -534,18 +534,24 @@ export class ChatwootService {
       return { shouldReply: false };
     }
 
-    if (payload.message_type !== "outgoing") {
-      console.log(`[Chatwoot] Ignoring non-outgoing message: ${payload.message_type}`);
+    // Chatwoot sends message_type as number (1=outgoing) or string ("outgoing")
+    const msgTypeRaw = payload.message_type;
+    const isOutgoing = msgTypeRaw === "outgoing" || msgTypeRaw === 1;
+    if (!isOutgoing) {
+      console.log(`[Chatwoot] Ignoring non-outgoing message: ${msgTypeRaw}`);
       return { shouldReply: false };
     }
 
-    if (payload.sender?.type !== "user") {
-      console.log(`[Chatwoot] Ignoring non-user sender: ${payload.sender?.type}`);
+    // Chatwoot sends sender.type as "user" or "agent_bot"; contacts have type "contact"
+    const senderType = (payload.sender as any)?.type;
+    if (senderType === "contact" || senderType === "channel") {
+      console.log(`[Chatwoot] Ignoring contact/channel sender: ${senderType}`);
       return { shouldReply: false };
     }
 
     const conversationId = payload.conversation?.id;
-    const inboxId = payload.conversation?.inbox_id;
+    // inbox_id may be on conversation or top-level inbox
+    const inboxId = payload.conversation?.inbox_id ?? (payload as any).inbox?.id;
 
     if (inboxId !== parseInt(this.inboxId, 10)) {
       console.log(`[Chatwoot] Ignoring wrong inbox: ${inboxId} vs ${this.inboxId}`);
