@@ -224,7 +224,7 @@ export default function WebhooksPage() {
               )}
             </DialogTitle>
           </DialogHeader>
-          <ScrollArea className="flex-1 pr-2">
+          <ScrollArea className="flex-1 min-h-0 pr-2">
             <div className="space-y-4">
               <div>
                 <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1">URL</p>
@@ -243,8 +243,8 @@ export default function WebhooksPage() {
               </div>
               <div>
                 <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1">Body</p>
-                <div className="bg-muted rounded-md p-3">
-                  <pre className="text-xs font-mono whitespace-pre-wrap break-all">
+                <div className="bg-muted rounded-md p-3 overflow-x-auto">
+                  <pre className="text-xs font-mono whitespace-pre break-normal min-w-0">
                     {JSON.stringify(selectedLog?.body, null, 2)}
                   </pre>
                 </div>
