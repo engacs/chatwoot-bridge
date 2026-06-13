@@ -141,7 +141,8 @@ export class ChatwootService {
   private async findOrCreateContact(
     phoneNumber: string,
     name?: string,
-    avatarUrl?: string | null
+    avatarUrl?: string | null,
+    isGroup: boolean = false
   ): Promise<ChatwootContact | null> {
     let cleanPhone = phoneNumber
       .replace("@s.whatsapp.net", "")
@@ -162,6 +163,9 @@ export class ChatwootService {
       if (name && name !== existingContact.name) {
         await this.updateContact(existingContact.id, { name });
       }
+      if (isGroup) {
+        await this.updateContact(existingContact.id, { custom_attributes: { is_group: true } } as any);
+      }
       if (avatarUrl) {
         await this.updateContactAvatar(existingContact.id, avatarUrl);
       }
@@ -178,6 +182,10 @@ export class ChatwootService {
 
     if (isStandardPhone) {
       contactData.phone_number = `+${cleanPhone}`;
+    }
+
+    if (isGroup) {
+      contactData.custom_attributes = { is_group: true };
     }
 
     const createResult = await this.apiRequest<any>(
@@ -276,7 +284,8 @@ export class ChatwootService {
 
   private async findOrCreateConversation(
     sourceId: string,
-    contactId: number
+    contactId: number,
+    isGroup: boolean = false
   ): Promise<ChatwootConversation | null> {
     // Normalize source_id: strip `:N` device suffix (e.g. "252618629126:0@s.whatsapp.net" → "252618629126@s.whatsapp.net")
     const normalizedSourceId = sourceId.replace(/:(\d+)(@)/, "$2");
@@ -310,14 +319,19 @@ export class ChatwootService {
     const cleanPhone = normalizedSourceId.replace("@s.whatsapp.net", "").replace("@g.us", "");
     console.log(`[Chatwoot] Creating new conversation for contact ${contactId} (${cleanPhone})`);
 
+    const convPayload: Record<string, unknown> = {
+      inbox_id: parseInt(this.inboxId, 10),
+      contact_id: contactId,
+      source_id: normalizedSourceId,
+    };
+    if (isGroup) {
+      convPayload.custom_attributes = { from_group: true };
+    }
+
     const createResult = await this.apiRequest<ChatwootConversation>(
       "POST",
       `/api/v1/accounts/${this.accountId}/conversations`,
-      {
-        inbox_id: parseInt(this.inboxId, 10),
-        contact_id: contactId,
-        source_id: normalizedSourceId,
-      }
+      convPayload
     );
 
     if (createResult) {
@@ -391,14 +405,14 @@ export class ChatwootService {
     // For groups: contact = the group itself. For DMs: contact = the person.
     const contactJid = isGroup ? remoteJid : senderJid;
     const contactName = isGroup ? (groupName || remoteJid) : (pushName || undefined);
-    const contact = await this.findOrCreateContact(contactJid, contactName, avatarUrl);
+    const contact = await this.findOrCreateContact(contactJid, contactName, avatarUrl, isGroup);
     if (!contact) {
       console.error(`[Chatwoot] Failed to create/find contact for ${contactJid}`);
       return;
     }
     console.log(`[Chatwoot] Contact ${contact.id} ready for ${contactJid}`);
 
-    const conversation = await this.findOrCreateConversation(remoteJid, contact.id);
+    const conversation = await this.findOrCreateConversation(remoteJid, contact.id, isGroup);
     if (!conversation) {
       console.error(`[Chatwoot] Failed to create/find conversation for contact ${contact.id} (${remoteJid})`);
       return;
