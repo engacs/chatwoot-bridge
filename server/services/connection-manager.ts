@@ -30,6 +30,7 @@ interface WhatsAppConnection {
 export class ConnectionManager extends EventEmitter {
   private connections: Map<number, WhatsAppConnection> = new Map();
   private lidToPhone: Map<string, string> = new Map(); // LID JID → phone JID
+  private groupNameCache: Map<string, string> = new Map(); // group JID → subject
   private static instance: ConnectionManager;
 
   private constructor() {
@@ -216,17 +217,29 @@ export class ConnectionManager extends EventEmitter {
         const syncAvatarSetting = await storage.getSetting(`account_${accountId}_sync_avatar`);
         const syncAvatar = syncAvatarSetting !== "false";
 
-        // Fetch group metadata to get group name
+        // Fetch group name (always — independent of syncAvatar, uses in-memory cache)
         let groupName: string | null = null;
-        if (isGroup && syncAvatar) {
-          try {
-            const metadata = await Promise.race([
-              socket.groupMetadata(remoteJid),
-              new Promise<null>((resolve) => setTimeout(() => resolve(null), 3000)),
-            ]);
-            groupName = metadata?.subject || null;
-          } catch {
-            groupName = null;
+        if (isGroup) {
+          const cacheKey = `${accountId}:${remoteJid}`;
+          if (this.groupNameCache.has(cacheKey)) {
+            groupName = this.groupNameCache.get(cacheKey)!;
+          } else {
+            try {
+              const metadata = await Promise.race([
+                socket.groupMetadata(remoteJid),
+                new Promise<null>((resolve) => setTimeout(() => resolve(null), 3000)),
+              ]);
+              groupName = metadata?.subject || null;
+              if (groupName) this.groupNameCache.set(cacheKey, groupName);
+            } catch {
+              groupName = null;
+            }
+            // If still no name, fetch in background for next message
+            if (!groupName) {
+              socket.groupMetadata(remoteJid)
+                .then((m) => { if (m?.subject) this.groupNameCache.set(cacheKey, m.subject); })
+                .catch(() => {});
+            }
           }
         }
 

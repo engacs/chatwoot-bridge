@@ -538,9 +538,14 @@ function MessageLogItem({ log }: { log: MessageLog }) {
         </div>
         <p className="text-xs text-gray-400 truncate">{log.content}</p>
       </div>
-      <span className="text-xs text-gray-300 flex-shrink-0 mt-0.5">
-        {new Date(log.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-      </span>
+      <div className="text-right flex-shrink-0 mt-0.5">
+        <div className="text-xs text-gray-300">
+          {new Date(log.createdAt).toLocaleDateString([], { month: "short", day: "numeric" })}
+        </div>
+        <div className="text-xs text-gray-300">
+          {new Date(log.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+        </div>
+      </div>
     </div>
   );
 }
